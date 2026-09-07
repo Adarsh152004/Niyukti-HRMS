@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hrms-frontend
+  namespace: hrms-production
+  labels:
+    app.kubernetes.io/name: hrms-frontend
+    app.kubernetes.io/part-of: ai-hrms
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrms-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hrms-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/hrms/frontend:v1.0.0
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hrms-frontend-service
+  namespace: hrms-production
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hrms-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hrms-ingress
+  namespace: hrms-production
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  tls:
+    - hosts:
+        - hrms.enterprise.internal
+      secretName: hrms-tls-secret
+  rules:
+    - host: hrms.enterprise.internal
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: hrms-backend-service
+                port:
+                  number: 8000
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: hrms-backend-service
+                port:
+                  number: 8000
+          - path: /graphql
+            pathType: Prefix
+            backend:
+              service:
+                name: hrms-backend-service
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hrms-frontend-service
+                port:
+                  number: 80

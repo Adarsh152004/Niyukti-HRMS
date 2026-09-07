@@ -1,0 +1,127 @@
+version: "3.8"
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL 16 with pgvector extension
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: hrms-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hrms_db
+      POSTGRES_USER: hrms_user
+      POSTGRES_PASSWORD: hrms_secure_password_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hrms_user -d hrms_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # Redis 7 In-Memory Cache & Rate Limiter
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: hrms-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # FastAPI Production Backend Gateway
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: hrms-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://hrms_user:hrms_secure_password_2026@postgres:5432/hrms_db
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: enterprise_jwt_secret_key_hrms_2026_super_secure
+      PORT: 8000
+    ports:
+      - "8000:8000"
+
+  # ----------------------------------------------------------------------------
+  # Transactional Outbox Event Poller Worker
+  # ----------------------------------------------------------------------------
+  outbox-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: hrms-outbox-worker
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - postgres
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://hrms_user:hrms_secure_password_2026@postgres:5432/hrms_db
+    command: ["python", "-m", "backend.events.outbox.worker"]
+
+  # ----------------------------------------------------------------------------
+  # React + Vite Production SPA (Nginx)
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: hrms-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+  # ----------------------------------------------------------------------------
+  # Prometheus Telemetry Collector
+  # ----------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: hrms-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  # ----------------------------------------------------------------------------
+  # Grafana Dashboard UI
+  # ----------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: hrms-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
