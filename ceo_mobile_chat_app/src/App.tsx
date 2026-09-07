@@ -4,7 +4,7 @@ import {
   TrendingUp, TrendingDown, Minus, ArrowUpRight, CheckCircle2, User, Building2, Zap, Clock,
   Table as TableIcon, Search, Download
 } from 'lucide-react';
-import { AIMarkdownRenderer } from './components/AIMarkdownRenderer';
+import { AIMarkdownRenderer, MobileTableOrCards } from './components/AIMarkdownRenderer';
 
 interface KeyMetric {
   label: string;
@@ -55,91 +55,10 @@ interface Message {
 }
 
 function MobileInteractiveTable({ table }: { table: DataTableStructure }) {
-  const [searchTerm, setSearchTerm] = useState('');
-
   if (!table || !table.columns || !table.rows || table.rows.length === 0) return null;
-
-  const filteredRows = table.rows.filter(row => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase();
-    return Object.values(row).some(v => String(v).toLowerCase().includes(term));
-  });
-
-  const renderCellBadge = (val: any) => {
-    const s = String(val).toUpperCase();
-    if (['ACTIVE', 'PRESENT', 'ON_TIME', 'APPROVED', 'COMPLETED', 'OPTIMAL', 'OPEN'].includes(s)) {
-      return (
-        <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-          {val}
-        </span>
-      );
-    }
-    if (['PENDING', 'IN_PROGRESS', 'REVIEW'].includes(s)) {
-      return (
-        <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-          {val}
-        </span>
-      );
-    }
-    if (['ABSENT', 'REJECTED', 'HIRING REQUIRED'].includes(s)) {
-      return (
-        <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30">
-          {val}
-        </span>
-      );
-    }
-    return String(val);
-  };
-
-  return (
-    <div className="mt-2 bg-slate-900 border border-slate-700/80 rounded-xl overflow-hidden shadow-xs">
-      <div className="p-2 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1">
-          <TableIcon className="w-3 h-3 text-emerald-400" />
-          <span className="text-[10px] font-bold text-slate-200 truncate">{table.title || 'Data Records'}</span>
-          <span className="text-[9px] px-1 rounded bg-slate-900 text-slate-400 font-mono">
-            {filteredRows.length}
-          </span>
-        </div>
-
-        <div className="relative">
-          <Search className="w-2.5 h-2.5 absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Filter..."
-            className="h-5 pl-4 pr-1.5 text-[10px] bg-slate-900 border border-slate-700 rounded text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 w-20"
-          />
-        </div>
-      </div>
-
-      <div className="overflow-x-auto max-h-48 scrollbar-thin">
-        <table className="w-full text-left border-collapse text-[10px]">
-          <thead>
-            <tr className="bg-slate-800/50 border-b border-slate-700 sticky top-0 backdrop-blur">
-              {table.columns.map((col, cIdx) => (
-                <th key={cIdx} className="px-2 py-1 font-semibold text-slate-400 uppercase whitespace-nowrap">
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800">
-            {filteredRows.map((row, rIdx) => (
-              <tr key={rIdx} className="hover:bg-slate-800/40 even:bg-slate-900/40">
-                {table.columns.map((col, cIdx) => (
-                  <td key={cIdx} className="px-2 py-1 text-slate-200 whitespace-nowrap">
-                    {renderCellBadge(row[col] ?? '--')}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  const headers = table.columns;
+  const rows = table.rows.map(r => table.columns.map(c => String(r[c] ?? '--')));
+  return <MobileTableOrCards headers={headers} rows={rows} />;
 }
 
 const DEFAULT_PROMPTS = [

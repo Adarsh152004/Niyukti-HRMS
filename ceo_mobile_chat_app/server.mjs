@@ -4,11 +4,14 @@ import tailwindcss from '../frontend/node_modules/tailwindcss/lib/index.js';
 import autoprefixer from '../frontend/node_modules/autoprefixer/lib/autoprefixer.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import tailwindConfig from './tailwind.config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
+  process.chdir(__dirname);
+
   const server = await createServer({
     root: __dirname,
     configFile: false,
@@ -16,12 +19,7 @@ async function startServer() {
     css: {
       postcss: {
         plugins: [
-          tailwindcss({
-            content: [
-              './index.html',
-              './src/**/*.{js,ts,jsx,tsx}',
-            ],
-          }),
+          tailwindcss(tailwindConfig),
           autoprefixer(),
         ],
       },
