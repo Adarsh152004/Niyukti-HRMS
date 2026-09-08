@@ -279,3 +279,53 @@ class GovernedMCPServer:
             success=True,
             data={"status": "EXECUTED", "result": "Success"},
         )
+
+
+# ==============================================================================
+# FastMCP Standard Protocol Server
+# ==============================================================================
+try:
+    from mcp.server.fastmcp import FastMCP
+    fastmcp_server = FastMCP("Niyukti-HRMS-Engine")
+
+    @fastmcp_server.tool()
+    async def hrms_get_employees(department: str = "", status: str = "ACTIVE") -> str:
+        """Query live HRMS employee records with department and status filters."""
+        from backend.agents.tools.db_tools import get_all_employees
+        res = await get_all_employees.ainvoke({"department": department, "status": status})
+        import json
+        return json.dumps(res, indent=2)
+
+    @fastmcp_server.tool()
+    async def hrms_attendance_summary(date_str: str = "") -> str:
+        """Query aggregate enterprise attendance and punch statistics."""
+        from backend.agents.tools.db_tools import get_attendance_summary
+        res = await get_attendance_summary.ainvoke({"date_str": date_str or None})
+        import json
+        return json.dumps(res, indent=2)
+
+    @fastmcp_server.tool()
+    async def hrms_payroll_summary() -> str:
+        """Query company payroll burn rate and latest disbursement cycle."""
+        from backend.agents.tools.db_tools import get_payroll_summary
+        res = await get_payroll_summary.ainvoke({})
+        import json
+        return json.dumps(res, indent=2)
+
+    @fastmcp_server.tool()
+    async def hrms_search_policies(query: str) -> str:
+        """Search company HR policy handbook, leaves, and attendance rules."""
+        from backend.agents.rag.policy_rag import search_company_policies
+        res = await search_company_policies.ainvoke({"query": query})
+        import json
+        return json.dumps(res, indent=2)
+
+except ImportError:
+    fastmcp_server = None
+
+
+if __name__ == "__main__":
+    if fastmcp_server:
+        fastmcp_server.run()
+    else:
+        print("GovernedMCPServer active.")

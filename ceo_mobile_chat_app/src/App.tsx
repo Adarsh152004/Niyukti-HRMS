@@ -186,6 +186,77 @@ export function CEOMobileChatPage() {
     }
   };
 
+  const handleApprove = async (workflowId: string) => {
+    if (!workflowId) return;
+    try {
+      const res = await fetch(`/api/v1/orchestration/workflows/${workflowId}/approve`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(prev =>
+          prev.map(m => {
+            if (m.id === workflowId || m.structured_data?.approval_request?.workflow_id === workflowId) {
+              const updatedSData = {
+                ...m.structured_data,
+                artifact: m.structured_data?.artifact ? { ...m.structured_data.artifact, status: 'APPROVED' } : undefined,
+                approval_request: m.structured_data?.approval_request ? { ...m.structured_data.approval_request, status: 'APPROVED' } : undefined,
+              };
+              return { ...m, structured_data: updatedSData };
+            }
+            return m;
+          })
+        );
+        if (data.next_message) {
+          const nextMsg: Message = {
+            id: 'next-' + Date.now(),
+            sender: 'ai',
+            text: data.next_message,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          setMessages(prev => [...prev, nextMsg]);
+        }
+      }
+    } catch (e) {
+      console.error('Approve failed:', e);
+    }
+  };
+
+  const handleRevise = async (workflowId: string, feedback: string) => {
+    if (!workflowId || !feedback) return;
+    try {
+      const userFeedbackMsg: Message = {
+        id: 'feedback-' + Date.now(),
+        sender: 'user',
+        text: feedback,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages(prev => [...prev, userFeedbackMsg]);
+
+      const res = await fetch(`/api/v1/orchestration/workflows/${workflowId}/revise`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const revisedMsg: Message = {
+          id: 'revised-' + Date.now(),
+          sender: 'ai',
+          text: data.next_message || 'Revised proposal based on your feedback.',
+          structured_data: {
+            artifact: data.artifact,
+            approval_request: data.approval_request,
+          },
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages(prev => [...prev, revisedMsg]);
+      }
+    } catch (e) {
+      console.error('Revise failed:', e);
+    }
+  };
+
   const handleSend = async (textToSend?: string) => {
     const query = (textToSend || input).trim();
     if (!query || isLoading) return;
@@ -449,6 +520,66 @@ export function CEOMobileChatPage() {
                           <ArrowUpRight className="w-2.5 h-2.5" />
                         </button>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Mobile HITL Approval Gate Card */}
+                  {!isUser && (sData?.artifact || sData?.approval_request) && (
+                    <div className="mt-2.5 p-3 rounded-xl bg-slate-900 border border-emerald-500/40 space-y-2.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${sData.artifact?.status === 'APPROVED' || sData.approval_request?.status === 'APPROVED' ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'}`} />
+                          <span className="text-[11px] font-bold text-white uppercase tracking-wider">
+                            {sData.artifact?.status === 'APPROVED' || sData.approval_request?.status === 'APPROVED' ? '✓ Authorized' : 'Human Approval Gate'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 font-mono">
+                          {sData.artifact?.type || 'APPROVAL'}
+                        </span>
+                      </div>
+
+                      <div className="text-xs font-semibold text-slate-100">
+                        {sData.artifact?.title || sData.approval_request?.action_required || 'Executive Authorization Required'}
+                      </div>
+
+                      {sData.artifact?.content?.salary_range && (
+                        <div className="text-[11px] text-slate-300 bg-slate-950/60 p-2 rounded border border-slate-800 space-y-1">
+                          <div><strong>Role:</strong> {sData.artifact.content.role_title} ({sData.artifact.content.department})</div>
+                          <div><strong>Band:</strong> {sData.artifact.content.salary_range}</div>
+                        </div>
+                      )}
+
+                      {sData.artifact?.content?.total_net_payout && (
+                        <div className="text-[11px] text-slate-300 bg-slate-950/60 p-2 rounded border border-slate-800 space-y-1">
+                          <div><strong>Period:</strong> {sData.artifact.content.period}</div>
+                          <div><strong>Net Disbursed:</strong> {sData.artifact.content.total_net_payout} ({sData.artifact.content.employee_count} staff)</div>
+                        </div>
+                      )}
+
+                      {sData.artifact?.status !== 'APPROVED' && sData.approval_request?.status !== 'APPROVED' ? (
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleApprove(sData.approval_request?.workflow_id || sData.approval_request?.id || msg.id)}
+                            className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition flex items-center justify-center gap-1"
+                          >
+                            <span>✓ Authorize & Disburse</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              const feedback = prompt('Enter your feedback for revision:');
+                              if (feedback) handleRevise(sData.approval_request?.workflow_id || msg.id, feedback);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition"
+                          >
+                            Revise
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-emerald-400 font-medium flex items-center gap-1.5 pt-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Execution authorized and downstream actions dispatched.</span>
+                        </div>
+                      )}
                     </div>
                   )}
 

@@ -19,7 +19,6 @@ export const EmployeeTopbar: React.FC = () => {
   const {
     profile,
     actorId,
-    setActorId,
     employeesList,
     attendance,
     currentTime,
@@ -28,6 +27,7 @@ export const EmployeeTopbar: React.FC = () => {
     refreshing,
     fetchData,
     handlePunch,
+    handleSelectEmployee,
     setShowLeaveModal,
   } = useEmployee();
 
@@ -61,7 +61,7 @@ export const EmployeeTopbar: React.FC = () => {
                 <select
                   id="employee-switcher"
                   value={actorId}
-                  onChange={(e) => setActorId(e.target.value)}
+                  onChange={(e) => handleSelectEmployee(e.target.value)}
                   className="h-7 pl-2 pr-6 text-xs font-bold bg-surface-secondary hover:bg-surface-secondary/80 border border-border hover:border-accent/40 rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer appearance-none transition-colors"
                   title="Switch logged-in employee profile"
                 >

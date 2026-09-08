@@ -671,12 +671,19 @@ export function AIAssistantPage() {
                   )}
 
                   {/* Artifact Card (Job Descriptions, Offers, Plans with Approval Gates) */}
-                  {!isUser && (msg.artifact || sData?.artifact) && (
+                  {!isUser && (msg.artifact || sData?.artifact || msg.approval_request || sData?.approval_request) && (
                     <div className="mt-3">
                       <ArtifactCard
-                        artifact={msg.artifact || (sData?.artifact as any)}
+                        artifact={msg.artifact || (sData?.artifact as any) || {
+                          id: (msg.approval_request || sData?.approval_request)?.id || 'art-approval',
+                          type: 'ADMIN_ACTION',
+                          title: (msg.approval_request || sData?.approval_request)?.action_required || 'Action Approval Request',
+                          version: 1,
+                          status: ((msg.approval_request || sData?.approval_request)?.status || 'AWAITING_APPROVAL') as any,
+                          content: (sData as any)?.content || {}
+                        }}
                         approvalRequest={msg.approval_request || (sData?.approval_request as any)}
-                        workflowId={msg.workflow_id || (sData as any)?.workflow_id}
+                        workflowId={msg.workflow_id || (sData as any)?.workflow_id || (sData as any)?.run_id}
                         onApprove={handleApprove}
                         onRevise={handleRevise}
                       />

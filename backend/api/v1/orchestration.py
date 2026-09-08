@@ -1683,65 +1683,205 @@ Tone & Autonomous Execution Rules:
 async def stream_orchestration(req: OrchestrationExecuteRequest):
     """
     Streams multi-agent reasoning steps, DAG progression, and response tokens in real-time
-    using Server-Sent Events (SSE), mirroring ChatGPT/Claude word-by-word streaming.
+    using Server-Sent Events (SSE). Integrates real LangGraph Multi-Agent Engine with
+    LLM reasoning (Gemini/Groq fallback), hybrid database tools, and HITL approval gates.
     """
+    q_lower = req.query.lower()
+    is_payroll_req = any(k in q_lower for k in ["payroll", "payout", "disburse salary", "compensation audit", "tax withholding", "run payroll", "execute payroll"])
+    is_offer_req = any(k in q_lower for k in ["offer letter", "create offer", "draft offer", "generate offer", "extend offer", "offer package", "offer proposal"])
+    is_leave_req = any(k in q_lower for k in ["leave request", "pto request", "vacation request", "leave exception", "approve leave", "maternity leave", "apply leave", "apply for leave"])
+    is_jd_req = (not is_payroll_req and not is_offer_req and not is_leave_req) and (
+        any(k in q_lower for k in ["jd", "job description", "create a jd", "draft a jd", "post a jd", "hiring requisition", "open a role", "new requisition", "create jd", "draft jd"]) or
+        (any(k in q_lower for k in ["hire", "hiring", "recruit", "recruitment"]) and any(k in q_lower for k in ["engineer", "developer", "designer", "manager", "intern", "staff", "role", "lead"]))
+    )
+    is_template_wf = any([
+        "deterministic payroll" in q_lower or ("payroll" in q_lower and "workflow" in q_lower),
+        "cross-dept requisition" in q_lower or ("headcount" in q_lower and "workflow" in q_lower),
+        "attendance integrity audit" in q_lower,
+        "generate candidate offer package" in q_lower or "candidate offer proposal" in q_lower,
+        is_payroll_req,
+        is_offer_req,
+        is_leave_req,
+        is_jd_req,
+    ])
+
     async def event_generator():
         try:
-            # 1. Execute orchestration graph logic
-            result = await execute_orchestration(req)
-            run_id = result.get("run_id")
-            structured = result.get("structured_response", {})
-            envelope = result.get("envelope", {})
-            raw_text = envelope.get("text", "")
-            chain = structured.get("collaboration_chain", [])
-            wf_details = WORKFLOW_DETAILS.get(run_id, {})
-            nodes = wf_details.get("nodes", [])
+            # -------------------------------------------------------------
+            # PATH A: Interactive Autonomous Multi-Step Template & HITL Approval Workflows
+            # -------------------------------------------------------------
+            if is_template_wf:
+                result = await execute_orchestration(req)
+                run_id = result.get("run_id")
+                structured = result.get("structured_response", {})
+                envelope = result.get("envelope", {})
+                raw_text = envelope.get("text", "")
+                chain = structured.get("collaboration_chain", [])
+                wf_details = WORKFLOW_DETAILS.get(run_id, {})
+                nodes = wf_details.get("nodes", [])
 
-            # 2. Emit metadata event
-            meta_payload = {
-                "run_id": run_id,
-                "decision": result.get("decision"),
-                "provider_used": result.get("provider_used"),
-                "collaboration_chain": chain,
-                "workflow_status": result.get("workflow_status"),
-                "artifact": structured.get("artifact"),
-                "approval_request": structured.get("approval_request"),
-            }
-            yield f"event: metadata\ndata: {json.dumps(meta_payload)}\n\n"
-            await asyncio.sleep(0.05)
-
-            # 3. Emit live node progress events
-            for node in nodes:
-                node_payload = {
-                    "node_id": node.get("id"),
-                    "label": node.get("label"),
-                    "agent_role": node.get("agent_role"),
-                    "status": node.get("status"),
-                    "execution_time_ms": node.get("execution_time_ms", 0),
+                meta_payload = {
+                    "run_id": run_id,
+                    "decision": result.get("decision"),
+                    "provider_used": result.get("provider_used"),
+                    "collaboration_chain": chain,
+                    "workflow_status": result.get("workflow_status"),
+                    "artifact": structured.get("artifact"),
+                    "approval_request": structured.get("approval_request"),
                 }
-                yield f"event: node_progress\ndata: {json.dumps(node_payload)}\n\n"
+                yield f"event: metadata\ndata: {json.dumps(meta_payload)}\n\n"
                 await asyncio.sleep(0.04)
 
-            # 4. Stream response tokens word-by-word
-            # Tokenize into word + whitespace chunks
-            tokens = re.findall(r'\S+|\s+', raw_text)
-            for token in tokens:
-                token_payload = {"token": token}
-                yield f"event: token\ndata: {json.dumps(token_payload)}\n\n"
-                # Natural typing cadence (12ms - 20ms)
-                await asyncio.sleep(0.015)
+                for node in nodes:
+                    node_payload = {
+                        "node_id": node.get("id"),
+                        "label": node.get("label"),
+                        "agent_role": node.get("agent_role"),
+                        "status": node.get("status"),
+                        "execution_time_ms": node.get("execution_time_ms", 0),
+                    }
+                    yield f"event: node_progress\ndata: {json.dumps(node_payload)}\n\n"
+                    await asyncio.sleep(0.03)
 
-            # 5. Emit complete structured response
+                tokens = re.findall(r'\S+|\s+', raw_text)
+                for token in tokens:
+                    token_payload = {"token": token}
+                    yield f"event: token\ndata: {json.dumps(token_payload)}\n\n"
+                    await asyncio.sleep(0.012)
+
+                complete_payload = {
+                    "status": "success",
+                    "run_id": run_id,
+                    "workflow_status": result.get("workflow_status"),
+                    "decision": result.get("decision"),
+                    "envelope": envelope,
+                    "structured_response": structured,
+                }
+                yield f"event: complete\ndata: {json.dumps(complete_payload)}\n\n"
+                yield "event: done\ndata: [DONE]\n\n"
+                return
+
+            # -------------------------------------------------------------
+            # PATH B: Real LangGraph Multi-Agent Reasoning Loop
+            # -------------------------------------------------------------
+            from backend.agents.orchestration.graph import langgraph_engine
+
+            run_id = f"run-{uuid.uuid4().hex[:8]}"
+            channel = req.channel or ("CEO_MOBILE" if "mobile" in req.initiator.lower() else "AI_WORKSPACE")
+            client_type = "mobile" if channel == "CEO_MOBILE" else "workforce"
+            accumulated_text = ""
+            active_artifact = None
+            active_approval = None
+            step_idx = 1
+
+            # Emit initial metadata
+            initial_meta = {
+                "run_id": run_id,
+                "decision": "AUTONOMOUS_EXECUTION",
+                "provider_used": "LangGraph-Gemini-Groq-Hybrid",
+                "collaboration_chain": ["Supervisor Router", "HR Data Analyst", "Policy Agent"],
+                "workflow_status": "RUNNING",
+            }
+            yield f"event: metadata\ndata: {json.dumps(initial_meta)}\n\n"
+
+            async for event_item in langgraph_engine.astream_events(
+                query=req.query,
+                caller_role="SUPERADMIN",
+                client_type=client_type,
+                conversation_id=run_id,
+            ):
+                event_type = event_item.get("event")
+                data = event_item.get("data", {})
+
+                if event_type == "thinking":
+                    node_payload = {
+                        "node_id": f"step-{step_idx}",
+                        "label": data.get("content", "Agent reasoning"),
+                        "agent_role": data.get("agent", "HR Agent"),
+                        "status": "running",
+                        "execution_time_ms": 12,
+                    }
+                    step_idx += 1
+                    yield f"event: node_progress\ndata: {json.dumps(node_payload)}\n\n"
+                    await asyncio.sleep(0.02)
+
+                elif event_type == "tool_call":
+                    node_payload = {
+                        "node_id": f"step-{step_idx}",
+                        "label": f"Executing Tool: {data.get('tool')}",
+                        "agent_role": "Database Gateway",
+                        "status": "running",
+                        "execution_time_ms": 25,
+                    }
+                    step_idx += 1
+                    yield f"event: node_progress\ndata: {json.dumps(node_payload)}\n\n"
+
+                elif event_type == "tool_result":
+                    node_payload = {
+                        "node_id": f"step-{step_idx - 1}",
+                        "label": f"Tool {data.get('tool')} Finished",
+                        "agent_role": "Database Gateway",
+                        "status": "completed",
+                        "execution_time_ms": 30,
+                    }
+                    yield f"event: node_progress\ndata: {json.dumps(node_payload)}\n\n"
+
+                elif event_type == "approval_required":
+                    active_approval = {
+                        "id": data.get("action_id"),
+                        "workflow_id": run_id,
+                        "status": "PENDING",
+                        "action_required": data.get("action"),
+                        "summary": data.get("summary"),
+                        "risk_level": data.get("risk_level", "HIGH"),
+                    }
+                    meta_update = {
+                        "run_id": run_id,
+                        "decision": "APPROVAL_GATE",
+                        "workflow_status": "WAITING_FOR_APPROVAL",
+                        "approval_request": active_approval,
+                    }
+                    yield f"event: metadata\ndata: {json.dumps(meta_update)}\n\n"
+
+                elif event_type == "token":
+                    token_text = data.get("text", "")
+                    accumulated_text += token_text
+                    yield f"event: token\ndata: {json.dumps({'token': token_text})}\n\n"
+
+                elif event_type == "done":
+                    break
+
+            # Save generated exchange to persistent history
+            try:
+                await save_chat_message(
+                    role="assistant",
+                    content=accumulated_text.strip() or "Processed query successfully.",
+                    structured_data={
+                        "approval_request": active_approval,
+                        "workflow_id": run_id,
+                        "provider": "LangGraph-Live",
+                    },
+                    channel=channel,
+                )
+            except Exception as save_err:
+                logger.warning(f"Failed to persist chat message: {save_err}")
+
             complete_payload = {
                 "status": "success",
                 "run_id": run_id,
-                "workflow_status": result.get("workflow_status"),
-                "decision": result.get("decision"),
-                "envelope": envelope,
-                "structured_response": structured,
+                "workflow_status": "WAITING_FOR_APPROVAL" if active_approval else "COMPLETED",
+                "decision": "APPROVAL_GATE" if active_approval else "AUTONOMOUS_EXECUTION",
+                "envelope": {"text": accumulated_text},
+                "structured_response": {
+                    "text": accumulated_text,
+                    "approval_request": active_approval,
+                    "artifact": active_artifact,
+                    "collaboration_chain": ["Supervisor Router", "HR Data Analyst"],
+                },
             }
             yield f"event: complete\ndata: {json.dumps(complete_payload)}\n\n"
             yield "event: done\ndata: [DONE]\n\n"
+
         except Exception as e:
             logger.exception("Error in SSE stream")
             err_payload = {"error": str(e)}
@@ -1754,7 +1894,7 @@ async def stream_orchestration(req: OrchestrationExecuteRequest):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )
 
 # ==========================================

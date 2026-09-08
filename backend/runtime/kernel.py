@@ -54,7 +54,7 @@ class EnterpriseKernel:
     """
 
     _instance: EnterpriseKernel | None = None
-    _lock: asyncio.Lock = asyncio.Lock()
+    _lock: asyncio.Lock | None = None
 
     def __init__(self, config: HRMSConfig | None = None) -> None:
         if EnterpriseKernel._instance is not None:
