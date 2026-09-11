@@ -17,7 +17,8 @@ from backend.agents.orchestration.ceo_whatsapp_orchestrator import handle_ceo_me
 logger = logging.getLogger("hrms.whatsapp_webhook")
 router = APIRouter(prefix="/api/v1/integrations/whatsapp", tags=["WhatsApp"])
 
-_provider = build_whatsapp_provider()
+def get_provider() -> Any:
+    return build_whatsapp_provider()
 
 @router.get("/webhook", summary="Meta webhook hub verification")
 async def verify_webhook(
@@ -35,7 +36,7 @@ async def verify_webhook(
 @router.post("/webhook", summary="Receive inbound WhatsApp messages")
 async def receive_whatsapp(request: Request):
     """
-    Receives inbound WhatsApp messages from Meta or Twilio.
+    Receives inbound WhatsApp messages from OpenWA, Meta or Twilio.
     Supports both application/json and application/x-www-form-urlencoded.
     1. Verifies signature
     2. Resolves sender to CEO identity
@@ -44,9 +45,10 @@ async def receive_whatsapp(request: Request):
     """
     body_bytes = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
+    provider = get_provider()
 
     # 1. Signature verification
-    sig_ok = await _provider.verify_webhook_signature(body_bytes, signature)
+    sig_ok = await provider.verify_webhook_signature(body_bytes, signature)
     if not sig_ok:
         logger.warning("WhatsApp webhook signature verification failed")
         raise HTTPException(status_code=403, detail="Invalid webhook signature")
@@ -60,7 +62,7 @@ async def receive_whatsapp(request: Request):
             parsed = parse_qs(body_bytes.decode("utf-8"))
             payload = {k: v[0] for k, v in parsed.items()}
 
-    msg = await _provider.parse_inbound_message(payload)
+    msg = await provider.parse_inbound_message(payload)
     if not msg:
         return {"status": "no_message"}
 
@@ -85,7 +87,7 @@ async def receive_whatsapp(request: Request):
         response_text = "I encountered an error processing your request. Please try again."
 
     # 5. Send response back via WhatsApp
-    result = await _provider.send_message(
+    result = await provider.send_message(
         WAOutboundMessage(to_number=msg.from_number, body=response_text)
     )
     logger.info(f"WhatsApp response sent: {result.status} id={result.provider_message_id}")
