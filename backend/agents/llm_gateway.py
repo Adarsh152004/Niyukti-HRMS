@@ -4,12 +4,12 @@ Supports primary Google Gemini (gemini-1.5-flash / gemini-2.0-flash) with
 resilient fallback to Groq (llama-3.1-70b-versatile / mixtral-8x7b-32768).
 """
 
-from __future__ import annotations
-
+import json
 import logging
 import os
 from typing import Any, AsyncIterator, Optional
 
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,7 +20,7 @@ logger = logging.getLogger("hrms.agents.llm_gateway")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 PRIMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "gemini").lower()
-DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "gemini-3.6-flash")
+DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "gemini-1.5-flash")
 
 
 class ResilientLLMGateway:
@@ -156,7 +156,7 @@ class ResilientLLMGateway:
             groq_msgs.append({"role": m.get("role", "user"), "content": m.get("content", "")})
 
         stream = await client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model="llama-3.3-70b-versatile",
             messages=groq_msgs,
             temperature=self.temperature,
             stream=True,
@@ -165,31 +165,6 @@ class ResilientLLMGateway:
             content = chunk.choices[0].delta.content
             if content:
                 yield content
-
-            payload = {
-                "model": "llama-3.1-8b-instant",
-                "messages": groq_msgs,
-                "temperature": self.temperature,
-                "stream": True,
-            }
-            async with httpx.AsyncClient(timeout=40.0) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as response:
-                    if response.status_code != 200:
-                        raise RuntimeError(f"Groq API returned HTTP {response.status_code}")
-
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            raw = line[6:].strip()
-                            if raw == "[DONE]":
-                                break
-                            if raw:
-                                try:
-                                    parsed = json.loads(raw)
-                                    choices = parsed.get("choices", [])
-                                    if choices and choices[0].get("delta", {}).get("content"):
-                                        yield choices[0]["delta"]["content"]
-                                except Exception:
-                                    pass
 
 
 # Singleton instance

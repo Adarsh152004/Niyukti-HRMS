@@ -78,10 +78,14 @@ logs/
 node_modules/
 .next/
 dist/
+openwa_gateway/data/
+openwa_gateway/dist/
+azyntrix/dist/
 
 # Database
 *.db
 *.sqlite3
+*.sqlite
 
 # Secrets
 *.pem

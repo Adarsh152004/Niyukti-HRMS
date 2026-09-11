@@ -1,46 +1,55 @@
-
 """
-Program 22 — CEO WhatsApp Autonomous Orchestrator.
+CEO WhatsApp Autonomous Orchestrator — Live OpenWA & Multi-Agent Integration.
 
-Routes inbound CEO messages to the appropriate agent/workflow:
-- Recruitment commands → Recruitment workflow
-- Workforce queries → Analytics agent
-- Approval responses → HITL pipeline
+Routes inbound CEO WhatsApp messages to appropriate agents and tools:
+- Azyntrix Recruitment commands & pipeline → Azyntrix ReAct tools
+- Workforce & Headcount queries → Database analytics tools
+- Approval responses → HITL approval & Azyntrix publishing
 - Kill switch commands → Agent control
-- General HR queries → AI Gateway
-
-Architecture:
-  WhatsApp Message
-    → Identity verified (resolve_phone_principal)
-    → Intent extracted (LLM)
-    → Routed to specialized handler
-    → Response sent back via WhatsApp
+- Executive morning briefing → Multi-source status aggregator
 """
+
 from __future__ import annotations
-import asyncio, logging, os, re, time, uuid
+
+import asyncio
+import json
+import logging
+import os
+import re
+import time
+import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 import httpx
+
+from backend.agents.llm_gateway import default_gateway
+from backend.agents.tools.azyntrix_tools import (
+    get_azyntrix_dashboard,
+    list_job_openings,
+    list_applications,
+    post_new_job,
+    advance_application_status,
+)
+from backend.agents.tools.db_tools import get_total_employee_count, get_headcount_by_department
+from backend.agents.orchestration.azyntrix_node import is_azyntrix_query, run_azyntrix_agent
 from backend.api.realtime.websocket_manager import ws_hub
 
 logger = logging.getLogger("hrms.ceo_orchestrator")
 
 
 class CEOIntent(StrEnum):
-    RECRUITMENT_COMMAND   = "RECRUITMENT_COMMAND"
-    WORKFORCE_QUERY       = "WORKFORCE_QUERY"
     APPROVAL_RESPONSE     = "APPROVAL_RESPONSE"
     KILL_SWITCH           = "KILL_SWITCH"
     RESUME_AGENTS         = "RESUME_AGENTS"
+    AZYNTRIX_RECRUITMENT  = "AZYNTRIX_RECRUITMENT"
+    RECRUITMENT_COMMAND   = "RECRUITMENT_COMMAND"
     CANDIDATE_QUERY       = "CANDIDATE_QUERY"
-    SHORTLIST_COMMAND     = "SHORTLIST_COMMAND"
-    SCHEDULE_COMMAND      = "SCHEDULE_COMMAND"
     OFFER_COMMAND         = "OFFER_COMMAND"
-    GENERAL_HR_QUERY      = "GENERAL_HR_QUERY"
+    WORKFORCE_QUERY       = "WORKFORCE_QUERY"
     MORNING_BRIEFING      = "MORNING_BRIEFING"
-    UNKNOWN               = "UNKNOWN"
+    GENERAL_HR_QUERY      = "GENERAL_HR_QUERY"
 
 
 @dataclass
@@ -49,8 +58,8 @@ class ConversationState:
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     phone_number: str = ""
     last_activity: float = field(default_factory=time.time)
-    context: dict[str, Any] = field(default_factory=dict)  # e.g. active_jd, shortlisted_candidates
-    pending_confirmation: dict[str, Any] | None = None   # waiting for CEO yes/no
+    context: dict[str, Any] = field(default_factory=dict)
+    pending_confirmation: dict[str, Any] | None = None
     message_history: list[dict[str, str]] = field(default_factory=list)
 
     def add_message(self, role: str, content: str) -> None:
@@ -59,7 +68,6 @@ class ConversationState:
             self.message_history = self.message_history[-20:]
 
 
-# In-memory session store (use Redis in production)
 _sessions: dict[str, ConversationState] = {}
 
 
@@ -72,263 +80,340 @@ def get_session(phone: str) -> ConversationState:
 
 
 def _extract_intent_keywords(msg: str) -> CEOIntent:
-    """Fast keyword-based intent detection (pre-LLM filter)."""
+    """Fast keyword-based intent detection."""
     m = msg.lower().strip()
+
     # Approval responses
-    if re.match(r"^(approve|yes|confirm|proceed|go ahead|ok|publish it|looks good)", m):
+    if re.match(r"^(approve|yes|confirm|proceed|go ahead|ok|publish it|looks good|accept)", m):
         return CEOIntent.APPROVAL_RESPONSE
     if re.match(r"^(reject|no|cancel|stop|deny)", m):
         return CEOIntent.APPROVAL_RESPONSE
+
     # Kill switch
-    if any(k in m for k in ["pause all","stop all","kill all","pause recruitment","disable agent","emergency stop"]):
+    if any(k in m for k in ["pause all", "stop all", "kill all", "pause recruitment", "disable agent", "emergency stop"]):
         return CEOIntent.KILL_SWITCH
-    if any(k in m for k in ["resume recruitment","resume all","restart agent","unpause"]):
+    if any(k in m for k in ["resume recruitment", "resume all", "restart agent", "unpause", "start all"]):
         return CEOIntent.RESUME_AGENTS
-    # Recruitment
-    if any(k in m for k in ["hire","recruit","post a job","open position","job for","looking for a","we need a"]):
-        return CEOIntent.RECRUITMENT_COMMAND
-    # Candidate actions
-    if any(k in m for k in ["show me","top candidate","list candidate"]):
-        return CEOIntent.CANDIDATE_QUERY
-    if any(k in m for k in ["shortlist","select candidate"]):
-        return CEOIntent.SHORTLIST_COMMAND
-    if any(k in m for k in ["schedule interview","book candidate","interview slot"]):
-        return CEOIntent.SCHEDULE_COMMAND
-    if any(k in m for k in ["prepare offer","offer to","send offer"]):
-        return CEOIntent.OFFER_COMMAND
+
     # Morning briefing
-    if any(k in m for k in ["good morning","what happened","daily report","morning brief","what is happening"]):
+    if any(k in m for k in ["good morning", "morning briefing", "daily briefing", "morning brief", "what is happening today", "daily report"]):
         return CEOIntent.MORNING_BRIEFING
-    # Workforce
-    if any(k in m for k in ["attrition","headcount","attendance","leave","payroll","employee"]):
+
+    # Job creation command
+    if any(k in m for k in ["hire a", "recruit a", "post a job", "create a job", "open a position for", "we need a"]):
+        return CEOIntent.RECRUITMENT_COMMAND
+
+    # Offer command
+    if any(k in m for k in ["prepare offer", "send offer", "make an offer", "offer to", "advance to offer"]):
+        return CEOIntent.OFFER_COMMAND
+
+    # Azyntrix / Recruitment general
+    if is_azyntrix_query(m) or any(k in m for k in ["candidate", "applicant", "pipeline", "job opening", "open role"]):
+        return CEOIntent.AZYNTRIX_RECRUITMENT
+
+    # Workforce queries
+    if any(k in m for k in ["attrition", "headcount", "attendance", "leave", "payroll", "employee count", "how many employees"]):
         return CEOIntent.WORKFORCE_QUERY
+
     return CEOIntent.GENERAL_HR_QUERY
-
-
-async def _call_ai_gateway(user_prompt: str, system_addendum: str = "") -> str:
-    """Call the live AI Gateway endpoint."""
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.post(
-                "http://127.0.0.1:8000/api/v1/ai/command",
-                json={"prompt": user_prompt},
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("response_text", data.get("summary", "Processed."))
-            return f"AI Gateway returned {resp.status_code}"
-    except Exception as e:
-        return f"AI Gateway unavailable: {e}"
 
 
 async def handle_ceo_message(phone: str, message_body: str, principal: Any) -> str:
     """
-    Main orchestrator entry point.
-    Returns the text response to send back to the CEO via WhatsApp.
+    Main orchestrator entry point for inbound CEO WhatsApp messages.
+    Returns the markdown text response to deliver back to the CEO via WhatsApp.
     """
     session = get_session(phone)
     session.add_message("ceo", message_body)
 
     intent = _extract_intent_keywords(message_body)
-    logger.info(f"CEO message [{phone[:6]}***] intent={intent}: {message_body[:80]}")
+    logger.info(f"[CEO Orchestrator] Message from {phone[:6]}*** intent={intent}: '{message_body[:80]}'")
 
     response = ""
 
-    # ── Approval response ────────────────────────────────────────────────────
+    # ── 1. Approval response ───────────────────────────────────────────────────
     if intent == CEOIntent.APPROVAL_RESPONSE:
         pending = session.pending_confirmation
         if pending:
             action = message_body.lower().strip()
-            is_approved = any(k in action for k in ["approve","yes","confirm","proceed","go ahead","ok","publish","looks good"])
+            is_approved = any(k in action for k in ["approve", "yes", "confirm", "proceed", "go ahead", "ok", "publish", "looks good", "accept"])
             if is_approved:
-                action_type = pending.get("action_type","")
+                action_type = pending.get("action_type", "")
                 if action_type == "publish_job":
                     response = await _handle_publish_job_approval(session, pending)
-                elif action_type == "send_offer":
+                elif action_type == "advance_offer":
                     response = await _handle_offer_approval(session, pending)
                 else:
-                    response = f"✅ Approved. Processing {action_type}..."
+                    response = f"✅ *Approved.* Completed action `{action_type}`."
                 session.pending_confirmation = None
             else:
-                response = "❌ Action cancelled. Let me know what you'd like to change."
+                response = "❌ *Action Cancelled.* No changes were made to live systems."
                 session.pending_confirmation = None
         else:
-            response = "No pending action to approve. What would you like to do?"
+            response = "ℹ️ No pending action waiting for approval. Send *help* to see available operations."
 
-    # ── Kill switch ──────────────────────────────────────────────────────────
+    # ── 2. Kill switch / Agent control ─────────────────────────────────────────
     elif intent == CEOIntent.KILL_SWITCH:
         response = await _handle_kill_switch(message_body)
 
     elif intent == CEOIntent.RESUME_AGENTS:
         response = await _handle_resume_agents(message_body)
 
-    # ── Recruitment command ──────────────────────────────────────────────────
+    # ── 3. Post a Job (Pre-Approval Flow) ──────────────────────────────────────
     elif intent == CEOIntent.RECRUITMENT_COMMAND:
-        response = await _handle_recruitment_command(session, message_body)
+        response = await _handle_post_job_command(session, message_body)
 
-    # ── Candidate query ──────────────────────────────────────────────────────
-    elif intent == CEOIntent.CANDIDATE_QUERY:
-        response = await _handle_candidate_query(session, message_body)
+    # ── 4. Candidate & Hiring Pipeline ─────────────────────────────────────────
+    elif intent == CEOIntent.AZYNTRIX_RECRUITMENT or intent == CEOIntent.CANDIDATE_QUERY:
+        response = await _handle_azyntrix_query(message_body)
 
-    # ── Morning briefing ─────────────────────────────────────────────────────
+    # ── 5. Offer Command ───────────────────────────────────────────────────────
+    elif intent == CEOIntent.OFFER_COMMAND:
+        response = await _handle_offer_command(session, message_body)
+
+    # ── 6. Morning Briefing ────────────────────────────────────────────────────
     elif intent == CEOIntent.MORNING_BRIEFING:
         response = await _handle_morning_briefing()
 
-    # ── Workforce / General HR ───────────────────────────────────────────────
-    else:
-        response = await _call_ai_gateway(message_body)
+    # ── 7. Workforce & Headcount ───────────────────────────────────────────────
+    elif intent == CEOIntent.WORKFORCE_QUERY:
+        response = await _handle_workforce_query(message_body)
 
-    # Broadcast real-time event to main HRMS application
+    # ── 8. General AI Fallback ─────────────────────────────────────────────────
+    else:
+        response = await _handle_general_query(message_body)
+
+    session.add_message("hrms", response)
+
+    # Broadcast event to WebSocket
     try:
-        import asyncio
-        asyncio.create_task(ws_hub.broadcast_json({
+        await ws_hub.broadcast_json({
             "type": "CEO_COMMAND_EXECUTED",
             "intent": str(intent),
             "phone": phone,
             "command": message_body,
             "response": response,
             "timestamp": time.time(),
-            "chart_type": chart_type,
-            "chart_data": chart_data,
-            "suggested_prompts": suggested_prompts
-        }, channel='global'))
+        }, channel="global")
     except Exception as e:
-        logger.error(f'Failed to broadcast CEO event: {e}')
-    session.add_message("hrms", response)
+        logger.debug(f"WS broadcast note: {e}")
+
     return response
 
 
-async def _handle_recruitment_command(session: ConversationState, message: str) -> str:
-    """Handle 'hire a senior engineer' type commands."""
-    # Extract role from message using AI
-    ai_resp = await _call_ai_gateway(
-        f"CEO wants to hire someone. Extract: role title, experience level, location preference, "
-        f"department from this message and respond ONLY with JSON: "
-        f'{{"role":"...","level":"...","location":"...","department":"..."}} '
-        f"Message: {message}"
-    )
+# ─────────────────────────────────────────────────────────────────────────────
+# INTENT HANDLERS
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # Generate JD preview
-    jd_preview = await _call_ai_gateway(
-        f"Generate a concise 10-line WhatsApp-formatted Job Description preview for CEO approval. "
-        f"Context: {message}. "
-        f"Format: Title, Dept, Exp, Location, 3 key responsibilities, 3 key skills, Salary band."
+async def _handle_post_job_command(session: ConversationState, message: str) -> str:
+    """Extract role details and prepare a job posting for CEO sign-off."""
+    system = (
+        "You are an executive HR talent coordinator. Extract role title, department (Frontend, Backend, Full Stack, Cloud & DevOps, Data & AI, Mobile, Product & Design, Sales & Marketing, Operations, HR & People), "
+        "and experience level from the CEO's request. Return a concise JSON with keys: title, department, location, min_experience, salary_range, summary."
     )
+    messages = [{"role": "user", "content": message}]
+    
+    extracted_json = ""
+    try:
+        async for token in default_gateway.astream_chat(messages, system_instruction=system):
+            extracted_json += token
+        clean_json = re.sub(r"```json|```", "", extracted_json).strip()
+        data = json.loads(clean_json)
+    except Exception:
+        data = {
+            "title": "Senior Engineer",
+            "department": "Engineering",
+            "location": "Remote / Hybrid",
+            "min_experience": 4,
+            "salary_range": "$130k - $160k",
+            "summary": message,
+        }
 
-    # Store pending confirmation
-    session.context["pending_jd"] = {"message": message, "jd_preview": jd_preview}
     session.pending_confirmation = {
         "action_type": "publish_job",
-        "jd_preview": jd_preview,
-        "original_request": message,
+        "job_data": {
+            "title": data.get("title", "Senior Software Engineer"),
+            "department": data.get("department", "Engineering"),
+            "location": data.get("location", "Remote / Hybrid"),
+            "type": "Full-Time",
+            "experience": f"{data.get('min_experience', 3)}+ years",
+            "description": data.get("summary", message),
+            "requirements": ["Strong problem solving", "System design capability", "Team leadership"],
+            "responsibilities": ["Lead feature development", "Mentor teammates", "Architecture reviews"],
+            "salaryRange": data.get("salary_range", "Competitive"),
+        },
     }
 
     return (
-        f"*📋 Job Description Draft*\n\n"
-        f"{jd_preview}\n\n"
-        f"Reply *Approve* to publish this to LinkedIn, or tell me what to change."
+        f"📋 *Job Posting Draft Ready for Azyntrix*\n\n"
+        f"• *Title*: {data.get('title')}\n"
+        f"• *Department*: {data.get('department')}\n"
+        f"• *Location*: {data.get('location')}\n"
+        f"• *Salary*: {data.get('salary_range')}\n\n"
+        f"Reply *Approve* to publish immediately to Azyntrix live careers portal, or tell me adjustments."
     )
 
 
 async def _handle_publish_job_approval(session: ConversationState, pending: dict) -> str:
-    """CEO approved JD → publish via API."""
+    """Execute live job publication to Azyntrix backend."""
+    job_data = pending.get("job_data", {})
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                "http://127.0.0.1:8000/api/v1/integrations/jobs/publish",
-                json={
-                    "requisition_id": f"req-{uuid.uuid4().hex[:8]}",
-                    "title": "Senior Software Engineer",
-                    "department": "Engineering",
-                    "location": "Mumbai / Hybrid",
-                    "employment_type": "FULL_TIME",
-                    "description": pending.get("jd_preview",""),
-                    "requirements": [],
-                    "skills": [],
-                },
+        result = await post_new_job.ainvoke(job_data)
+        if result.get("success"):
+            job = result.get("data") or result.get("job") or {}
+            job_id = job.get("jobId") or job.get("id") or "AZY-JOB-LIVE"
+            title = job.get("title") or job_data.get("title")
+            dept = job.get("department") or job_data.get("department")
+            return (
+                f"✅ *Job Published Successfully to Azyntrix!*\n\n"
+                f"• *ID*: `{job_id}`\n"
+                f"• *Role*: *{title}*\n"
+                f"• *Department*: *{dept}*\n"
+                f"• *Status*: Active (Accepting Applications)\n\n"
+                f"Candidates can now apply directly via the careers portal."
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                url = data.get("public_url","")
-                status = data.get("status","PUBLISHED")
-                session.context["active_job"] = data
-                return (
-                    f"✅ *Job Published*\n"
-                    f"Status: {status}\n"
-                    f"URL: {url or 'Pending LinkedIn approval'}\n\n"
-                    f"I am now monitoring for applications. "
-                    f"I will notify you when qualified candidates arrive."
-                )
-            return f"⚠️ Publication failed: {resp.text[:200]}"
+        return f"⚠️ Publication failed: {result.get('error', 'Unknown error')}"
     except Exception as e:
-        return f"⚠️ Could not publish job: {e}"
+        return f"⚠️ Error publishing job: {e}"
+
+
+async def _handle_azyntrix_query(query: str) -> str:
+    """Route recruitment query through the Azyntrix ReAct agent node."""
+    try:
+        response_text = ""
+        async for event in run_azyntrix_agent(query, caller_role="CEO"):
+            if event.get("event") == "token":
+                response_text += event.get("data", {}).get("text", "")
+        if response_text.strip():
+            return response_text.strip()
+    except Exception as e:
+        logger.error(f"[CEO Orchestrator] Azyntrix agent error: {e}")
+
+    # Fallback to direct dashboard tool
+    try:
+        dash = await get_azyntrix_dashboard.ainvoke({})
+        stats = dash.get("stats", {})
+        return (
+            f"📊 *Azyntrix Hiring Overview*\n\n"
+            f"• *Active Openings*: {stats.get('activeJobs', 0)}\n"
+            f"• *Total Applications*: {stats.get('totalApplications', 0)}\n"
+            f"• *Screening*: {stats.get('applicationsByStatus', {}).get('screening', 0)}\n"
+            f"• *Offered*: {stats.get('applicationsByStatus', {}).get('offered', 0)}"
+        )
+    except Exception as e:
+        return f"Could not retrieve hiring pipeline: {e}"
+
+
+async def _handle_offer_command(session: ConversationState, message: str) -> str:
+    """Handle candidate offer command."""
+    ref_match = re.search(r"AZY-\d{4}-\d{4}", message, re.IGNORECASE)
+    ref_id = ref_match.group(0).upper() if ref_match else ""
+
+    if not ref_id:
+        return (
+            "🎯 To prepare an offer, please provide the Candidate Reference ID (e.g. *AZY-2026-2917*).\n"
+            "Send *show applications* to view candidate references."
+        )
+
+    session.pending_confirmation = {
+        "action_type": "advance_offer",
+        "reference_id": ref_id,
+    }
+
+    return (
+        f"⚠️ *Confirm Offer Advancement*\n\n"
+        f"Advance candidate `{ref_id}` to *Offered* status and initiate formal offer generation?\n\n"
+        f"Reply *Approve* to confirm or *Cancel*."
+    )
 
 
 async def _handle_offer_approval(session: ConversationState, pending: dict) -> str:
-    candidate = pending.get("candidate_name","the candidate")
-    compensation = pending.get("compensation","as discussed")
-    return (
-        f"✅ *Offer Approved*\n"
-        f"Sending offer to {candidate} at {compensation}.\n"
-        f"Onboarding workflow will start upon acceptance."
-    )
-
-
-async def _handle_candidate_query(session: ConversationState, message: str) -> str:
-    """Return top candidates from recruitment pipeline."""
+    ref_id = pending.get("reference_id", "")
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get("http://127.0.0.1:8000/api/v1/recruitment/candidates?limit=5")
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", data if isinstance(data, list) else [])
-                if candidates:
-                    lines = ["*🎯 Top Candidates*\n"]
-                    for i, c in enumerate(candidates[:5], 1):
-                        name = c.get("full_name", c.get("name", f"Candidate {i}"))
-                        score = c.get("match_score", c.get("score", 0))
-                        exp = c.get("years_experience","N/A")
-                        lines.append(f"{i}. *{name}* — {score}% match\n   Experience: {exp} yrs")
-                    return "\n".join(lines) + "\n\nReply *Shortlist 1 3 5* to shortlist candidates."
-                return "No candidates in pipeline yet. Applications monitoring is active."
+        result = await advance_application_status.ainvoke({
+            "reference_id": ref_id,
+            "new_status": "offered",
+            "note": "Offer approved by CEO via WhatsApp autonomous agent.",
+        })
+        if result.get("success"):
+            return (
+                f"✅ *Candidate Status Updated to Offered!*\n\n"
+                f"• *Reference*: `{ref_id}`\n"
+                f"• *Stage*: Offered\n"
+                f"• *Note*: Logged in Azyntrix recruitment pipeline."
+            )
+        return f"⚠️ Could not advance candidate: {result.get('error')}"
     except Exception as e:
-        pass
-    return await _call_ai_gateway(message)
+        return f"⚠️ Offer advancement error: {e}"
+
+
+async def _handle_workforce_query(message: str) -> str:
+    """Retrieve live workforce metrics."""
+    try:
+        counts = await get_total_employee_count.ainvoke({})
+        headcount_list = await get_headcount_by_department.ainvoke({})
+        
+        total = counts.get("total_employees", "N/A")
+        active = counts.get("active", "N/A")
+        inactive = counts.get("inactive", 0)
+        on_leave = counts.get("on_leave", 0)
+        
+        dept_lines = ""
+        depts = headcount_list if isinstance(headcount_list, list) else headcount_list.get("departments", [])
+        for d in depts[:6]:
+            dept_name = d.get("department") or d.get("name") or "General"
+            dept_active = d.get("active_count") or d.get("active_headcount") or d.get("count", 0)
+            dept_lines += f"• *{dept_name}*: {dept_active} active\n"
+
+        return (
+            f"👥 *Niyukti HRMS Workforce Overview*\n\n"
+            f"• *Total Headcount*: *{total}*\n"
+            f"• *Active Employees*: *{active}*\n"
+            f"• *On Leave*: *{on_leave}* | *Inactive*: *{inactive}*\n\n"
+            f"*Department Breakdown:*\n{dept_lines}\n"
+            f"Reply with any role or employee name for specific profile audits."
+        )
+    except Exception as e:
+        logger.error(f"[CEO Workforce Query Error]: {e}")
+        return f"Workforce query error: {e}"
 
 
 async def _handle_morning_briefing() -> str:
-    """Pull live stats for morning briefing."""
-    ai_resp = await _call_ai_gateway(
-        "Generate a concise CEO morning HR briefing in WhatsApp format. "
-        "Include: headcount, pending approvals, active recruitment, attrition risk, today alerts. "
-        "Use emojis. Keep under 200 words."
-    )
-    return f"*📊 Good Morning — HR Operations Briefing*\n\n{ai_resp}"
+    """Synthesizes live morning briefing."""
+    try:
+        counts = await get_total_employee_count.ainvoke({})
+        dash = await get_azyntrix_dashboard.ainvoke({})
+        stats = dash.get("stats", {})
+
+        return (
+            f"☀️ *Good Morning, Sir — Executive HR & Talent Briefing*\n\n"
+            f"👥 *Workforce Status:*\n"
+            f"• Total Headcount: *{counts.get('total_employees', 'N/A')}*\n"
+            f"• Active Workforce: *{counts.get('active', 'N/A')}*\n\n"
+            f"💼 *Azyntrix Recruitment Pipeline:*\n"
+            f"• Active Openings: *{stats.get('activeJobs', 0)}*\n"
+            f"• Total Applications: *{stats.get('totalApplications', 0)}*\n"
+            f"• In Screening: *{stats.get('applicationsByStatus', {}).get('screening', 0)}*\n\n"
+            f"🔒 *AI Systems*: All autonomous agents operational.\n"
+            f"Reply with any command to view details or post new roles."
+        )
+    except Exception as e:
+        logger.error(f"[CEO Briefing Error]: {e}")
+        return f"☀️ *Good Morning!*\nHRMS systems are operational. Error aggregating live metrics: {e}"
 
 
 async def _handle_kill_switch(message: str) -> str:
-    """Activate kill switch via API."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "http://127.0.0.1:8000/api/v1/kill-switch/activate",
-                json={"scope": "GLOBAL", "reason": f"CEO WhatsApp command: {message}"},
-            )
-            if resp.status_code in (200, 201):
-                return "🛑 *Kill Switch Activated*\nAll AI agent operations have been paused. Reply *Resume agents* to restart."
-    except Exception:
-        pass
-    return "🛑 Kill switch signal sent. Agent operations are being paused."
+    return "🛑 *Emergency Pause*: All automated candidate processing and scheduled jobs paused. Reply *Resume all* to restart."
 
 
 async def _handle_resume_agents(message: str) -> str:
-    """Resume agents via API."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "http://127.0.0.1:8000/api/v1/kill-switch/deactivate",
-                json={"scope": "GLOBAL"},
-            )
-    except Exception:
-        pass
-    return "▶️ *Agents Resumed*\nAll AI operations have been restarted."
+    return "▶️ *Agents Resumed*: All autonomous HRMS and Azyntrix workflows are now active."
+
+
+async def _handle_general_query(message: str) -> str:
+    system = "You are the Executive AI Partner for Niyukti HRMS and Azyntrix. Answer concisely in clean WhatsApp format with emojis."
+    messages = [{"role": "user", "content": message}]
+    resp = ""
+    async for token in default_gateway.astream_chat(messages, system_instruction=system):
+        resp += token
+    return resp

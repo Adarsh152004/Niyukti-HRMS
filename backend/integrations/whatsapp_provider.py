@@ -193,6 +193,172 @@ class TwilioWhatsAppProvider(WhatsAppProvider):
             r = {"provider":"twilio","status":IntegrationStatus.ERROR,"message":str(e)}
         self._cache, self._cache_t = r, now; return r
 
+class OpenWAProvider(WhatsAppProvider):
+    """
+    Self-Hosted OpenWA Gateway Provider (rmyndharis/OpenWA).
+    Communicates with local/remote OpenWA instance over REST API and Webhooks.
+    """
+    def __init__(self):
+        self.base_url = os.getenv("OPENWA_BASE_URL", "http://localhost:3000").rstrip("/")
+        self.api_key = os.getenv("OPENWA_API_KEY", "")
+        self.session = os.getenv("OPENWA_SESSION_ID", "default")
+        self.webhook_secret = os.getenv("OPENWA_WEBHOOK_SECRET", "")
+        self._cache = {}
+        self._cache_t = 0
+
+    def _headers(self) -> dict[str, str]:
+        h = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.api_key:
+            h["Authorization"] = f"Bearer {self.api_key}"
+            h["X-Api-Key"] = self.api_key
+        return h
+
+    def _ok(self) -> bool:
+        return bool(self.base_url)
+
+    async def verify_webhook_signature(self, payload: bytes, sig: str) -> bool:
+        if not self.webhook_secret:
+            return True
+        exp = "sha256=" + hmac.new(self.webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(exp, sig)
+
+    async def parse_inbound_message(self, payload: dict) -> WAInboundMessage | None:
+        """
+        Parses incoming OpenWA webhook payloads.
+        Supports both nested event payloads (event='message') and direct flat payloads.
+        """
+        try:
+            # Check nested data structure from OpenWA webhook
+            data = payload.get("data", payload)
+            
+            # Extract sender
+            raw_from = data.get("from") or data.get("sender") or data.get("From", "")
+            if not raw_from and isinstance(data.get("chat"), dict):
+                raw_from = data["chat"].get("id", "")
+            
+            clean_from = raw_from.replace("@c.us", "").replace("@s.whatsapp.net", "").replace("whatsapp:", "")
+            if clean_from and not clean_from.startswith("+"):
+                clean_from = "+" + clean_from
+
+            # Extract recipient
+            raw_to = data.get("to") or data.get("To", "")
+            clean_to = raw_to.replace("@c.us", "").replace("@s.whatsapp.net", "").replace("whatsapp:", "")
+            if clean_to and not clean_to.startswith("+"):
+                clean_to = "+" + clean_to
+
+            # Extract body
+            body = data.get("body") or data.get("text") or data.get("Body") or data.get("message", "")
+            if not body and data.get("caption"):
+                body = data["caption"]
+
+            if not clean_from or not body:
+                return None
+
+            msg_id = str(data.get("id") or data.get("messageId") or uuid.uuid4())
+            msg_type = data.get("type", "text")
+            ts = str(data.get("timestamp") or int(time.time()))
+
+            return WAInboundMessage(
+                message_id=str(uuid.uuid4()),
+                from_number=clean_from,
+                to_number=clean_to,
+                body=str(body).strip(),
+                message_type=msg_type,
+                timestamp=ts,
+                provider_message_id=msg_id,
+                raw_payload=payload,
+            )
+        except Exception as e:
+            logger.error(f"[OpenWA] Inbound parse error: {e}")
+            return None
+
+    async def send_message(self, msg: WAOutboundMessage) -> WASendResult:
+        """
+        Dispatches outbound message to the OpenWA REST API.
+        Attempts primary endpoints: /api/sendText or /api/{session}/send-message.
+        """
+        if not self._ok():
+            return WASendResult(False, error="OpenWA base URL not configured", status="NOT_CONFIGURED")
+
+        clean_number = msg.to_number.lstrip("+").replace("@c.us", "")
+        chat_id = f"{clean_number}@c.us"
+
+        # Endpoints to attempt (supporting standard OpenWA REST schemas)
+        endpoints = [
+            f"{self.base_url}/api/{self.session}/send-message",
+            f"{self.base_url}/api/sendText",
+            f"{self.base_url}/api/messages/send",
+        ]
+
+        payload = {
+            "chatId": chat_id,
+            "to": chat_id,
+            "text": msg.body,
+            "message": msg.body,
+            "session": self.session,
+        }
+
+        last_error = ""
+        for url in endpoints:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(url, headers=self._headers(), json=payload)
+                    if resp.status_code in (200, 201):
+                        data = resp.json()
+                        mid = str(data.get("id") or data.get("messageId") or data.get("data", {}).get("id") or f"owa-{uuid.uuid4().hex[:8]}")
+                        logger.info(f"[OpenWA] Message delivered via {url} -> id: {mid}")
+                        return WASendResult(True, provider_message_id=mid, status="SENT")
+                    last_error = f"HTTP {resp.status_code}: {resp.text[:150]}"
+            except Exception as e:
+                last_error = str(e)
+
+        logger.warning(f"[OpenWA] Send failed across endpoints: {last_error}")
+        return WASendResult(False, error=last_error, status="FAILED")
+
+    async def get_status(self) -> dict:
+        now = time.time()
+        if self._cache and now - self._cache_t < 30:
+            return self._cache
+
+        if not self._ok():
+            r = {
+                "provider": "openwa",
+                "status": IntegrationStatus.NOT_CONFIGURED,
+                "message": "Set OPENWA_BASE_URL (e.g. http://localhost:3000)",
+            }
+            self._cache, self._cache_t = r, now
+            return r
+
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                resp = await client.get(f"{self.base_url}/api/{self.session}/status", headers=self._headers())
+                if resp.status_code == 200:
+                    d = resp.json()
+                    r = {
+                        "provider": "openwa",
+                        "status": IntegrationStatus.LIVE,
+                        "session": self.session,
+                        "state": d.get("state", "CONNECTED"),
+                        "phone": d.get("phone", d.get("me", {}).get("id")),
+                    }
+                else:
+                    r = {
+                        "provider": "openwa",
+                        "status": IntegrationStatus.CONFIGURED_BUT_NOT_VERIFIED,
+                        "message": f"OpenWA returned HTTP {resp.status_code}",
+                        "endpoint": self.base_url,
+                    }
+        except Exception as e:
+            r = {
+                "provider": "openwa",
+                "status": IntegrationStatus.ERROR,
+                "message": f"Could not reach OpenWA instance at {self.base_url}: {e}",
+            }
+
+        self._cache, self._cache_t = r, now
+        return r
+
+
 class MockWhatsAppProvider(WhatsAppProvider):
     def __init__(self):
         self.sent: list[dict] = []
@@ -201,11 +367,18 @@ class MockWhatsAppProvider(WhatsAppProvider):
     async def verify_webhook_signature(self, payload: bytes, sig: str) -> bool: return True
 
     async def parse_inbound_message(self, payload: dict) -> WAInboundMessage | None:
-        body = payload.get("Body","")
+        body = payload.get("Body","") or payload.get("body","") or payload.get("message","")
+        if not body and isinstance(payload.get("data"), dict):
+            body = payload["data"].get("body","")
         if not body: return None
+        
+        from_num = payload.get("From","") or payload.get("from","+919372267957")
+        if isinstance(payload.get("data"), dict) and not from_num:
+            from_num = payload["data"].get("from","+919372267957")
+            
         m = WAInboundMessage(
             message_id=str(uuid.uuid4()),
-            from_number=payload.get("From","+15550000000"),
+            from_number=from_num.replace("@c.us",""),
             to_number=payload.get("To","+15551111111"),
             body=body, timestamp=str(int(time.time())), raw_payload=payload,
         )
@@ -219,13 +392,17 @@ class MockWhatsAppProvider(WhatsAppProvider):
 
     async def get_status(self) -> dict:
         return {"provider":"mock","status":IntegrationStatus.MOCK,
-                "message":"MOCK mode. Set WHATSAPP_PROVIDER=meta or twilio for real integration.",
+                "message":"MOCK mode. Set WHATSAPP_PROVIDER=openwa, meta, or twilio for live integration.",
                 "sent_count":len(self.sent)}
 
 def build_whatsapp_provider() -> WhatsAppProvider:
     p = os.getenv("WHATSAPP_PROVIDER","").lower()
-    if p == "meta": return MetaWhatsAppProvider()
-    elif p == "twilio": return TwilioWhatsAppProvider()
+    if p == "openwa" or (not p and os.getenv("OPENWA_BASE_URL")):
+        return OpenWAProvider()
+    elif p == "meta":
+        return MetaWhatsAppProvider()
+    elif p == "twilio":
+        return TwilioWhatsAppProvider()
     return MockWhatsAppProvider()
 
 def normalize_phone(raw: str) -> str:

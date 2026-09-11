@@ -19,6 +19,7 @@ from backend.agents.llm_gateway import default_gateway
 from backend.agents.rag.policy_rag import search_company_policies
 from backend.agents.tools.db_tools import ALL_DB_TOOLS
 from backend.agents.tools.guarded_sql_tool import execute_read_only_sql
+from backend.agents.orchestration.azyntrix_node import run_azyntrix_agent, is_azyntrix_query
 
 logger = logging.getLogger("hrms.agents.orchestration.graph")
 
@@ -212,7 +213,16 @@ class LangGraphHRMSEngine:
         }
 
         # Step 2: Check for HITL Trigger
-        if any(keyword in lower for keyword in ["run payroll", "execute payroll", "approve all leaves", "terminate employee"]):
+        # ── Expanded HITL Trigger Keywords ──────────────────────────────────────
+        HITL_TRIGGERS = [
+            "run payroll", "execute payroll", "process payroll", "disburse salary",
+            "process salary", "run salary", "salary disbursement", "payroll batch",
+            "approve all leaves", "mass approve", "bulk approve", "approve all pending",
+            "terminate employee", "fire employee", "remove employee", "offboard employee",
+            "process bonus", "pay bonus", "issue bonus", "bonus run",
+            "delete employee", "wipe records", "purge data",
+        ]
+        if any(keyword in lower for keyword in HITL_TRIGGERS):
             action_id = f"act-{uuid.uuid4().hex[:8]}"
             yield {
                 "event": "thinking",
@@ -225,7 +235,10 @@ class LangGraphHRMSEngine:
                 "event": "approval_required",
                 "data": {
                     "action_id": action_id,
-                    "action": "Deterministic Payroll Batch Run" if "payroll" in lower else "Bulk Leave Approval",
+                    "action": (
+                        "Payroll Batch Disbursement" if any(k in lower for k in ["payroll", "salary", "bonus"]) 
+                        else "Bulk Administrative Action"
+                    ),
                     "summary": f"Executing '{query}' modifies active enterprise records and triggers bank disbursements.",
                     "risk_level": "CRITICAL" if "payroll" in lower else "HIGH",
                     "thread_id": thread_id,
@@ -284,7 +297,20 @@ class LangGraphHRMSEngine:
             yield {"event": "done", "data": {"status": "SUCCESS", "agent": "Policy Agent"}}
             return
 
-        # Step 4: HR Data Analyst (Database Queries)
+        # Step 4: Azyntrix Recruitment Agent Route
+        if is_azyntrix_query(query):
+            yield {
+                "event": "thinking",
+                "data": {
+                    "agent": "Azyntrix Recruitment Coordinator",
+                    "content": "Routing to Azyntrix talent operations agent...",
+                },
+            }
+            async for event in run_azyntrix_agent(query, caller_role=caller_role):
+                yield event
+            return
+
+        # Step 5: HR Data Analyst (Database Queries)
         yield {
             "event": "thinking",
             "data": {
@@ -296,7 +322,14 @@ class LangGraphHRMSEngine:
         # Smart Tool Selection based on query semantics
         tool_results_text = ""
 
-        if any(k in lower for k in ["headcount", "department breakdown", "departments", "team size"]):
+        if any(k in lower for k in ["how many employees", "total employee", "employee count", "staff count", "headcount total", "total headcount", "total staff"]):
+            yield {"event": "tool_call", "data": {"tool": "get_total_employee_count", "args": {}}}
+            from backend.agents.tools.db_tools import get_total_employee_count
+            res = await get_total_employee_count.ainvoke({})
+            yield {"event": "tool_result", "data": {"tool": "get_total_employee_count", "result": res}}
+            tool_results_text += f"\nTotal Employee Count:\n{json.dumps(res, indent=2)}\n"
+
+        elif any(k in lower for k in ["headcount", "department breakdown", "departments", "team size"]):
             yield {"event": "tool_call", "data": {"tool": "get_headcount_by_department", "args": {}}}
             from backend.agents.tools.db_tools import get_headcount_by_department
             res = await get_headcount_by_department.ainvoke({})

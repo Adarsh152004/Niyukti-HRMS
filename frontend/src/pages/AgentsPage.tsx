@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { PageHeader, Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { StatusBadge, Badge } from '@/components/ui/badge';
+import { StatusBadge, Badge, type StatusVariant } from '@/components/ui/badge';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table';
@@ -25,7 +25,19 @@ interface ActiveWorkflowRun {
   nodes?: any[];
 }
 
-const FLEET_AGENTS = [
+interface FleetAgent {
+  id: string;
+  name: string;
+  role: string;
+  status: StatusVariant;
+  tasks_today: number;
+  success_rate: number;
+  avg_latency_ms: number;
+  autonomy_mode: string;
+  primary_domain: string;
+}
+
+const FLEET_AGENTS: FleetAgent[] = [
   {
     id: 'agent-nova',
     name: 'Executive Partner (Nova)',

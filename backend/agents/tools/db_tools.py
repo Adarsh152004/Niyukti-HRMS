@@ -42,10 +42,24 @@ async def get_all_employees(department: Optional[str] = None, status: str = "ACT
             query += " AND (LOWER(d.name) LIKE ? OR LOWER(d.code) LIKE ?)"
             params.extend([f"%{department.lower()}%", f"%{department.lower()}%"])
 
-        query += " ORDER BY e.employee_code ASC LIMIT 50"
+        query += " ORDER BY e.employee_code ASC"
         cursor = await conn.execute(query, params)
         rows = await cursor.fetchall()
-        return [
+
+        # Also get the total count for this filter (not just the rows returned)
+        count_query = "SELECT COUNT(*) as cnt FROM employees e LEFT JOIN departments d ON e.department_id = d.id WHERE 1=1"
+        count_params: list[Any] = []
+        if status and status.upper() != "ALL":
+            count_query += " AND UPPER(e.employment_status) = ?"
+            count_params.append(status.upper())
+        if department:
+            count_query += " AND (LOWER(d.name) LIKE ? OR LOWER(d.code) LIKE ?)"
+            count_params.extend([f"%{department.lower()}%", f"%{department.lower()}%"])
+        count_cursor = await conn.execute(count_query, count_params)
+        count_row = await count_cursor.fetchone()
+        total_count = count_row["cnt"] if count_row else len(rows)
+
+        result = [
             {
                 "employee_code": r["employee_code"],
                 "name": f"{r['first_name']} {r['last_name']}".strip(),
@@ -58,6 +72,8 @@ async def get_all_employees(department: Optional[str] = None, status: str = "ACT
             }
             for r in rows
         ]
+        # Prepend summary so agent always has the real total
+        return [{"_summary": f"{total_count} employee(s) match the filter (showing all)", "_total_count": total_count}] + result
 
 
 @tool
@@ -70,8 +86,9 @@ async def get_headcount_by_department() -> list[dict[str, Any]]:
         query = """
             SELECT 
                 COALESCE(d.name, 'Unassigned') as department,
-                COUNT(e.id) as total_headcount,
-                SUM(CASE WHEN UPPER(e.employment_status) = 'ACTIVE' THEN 1 ELSE 0 END) as active_count
+                COUNT(*) as total_headcount,
+                SUM(CASE WHEN UPPER(e.employment_status) = 'ACTIVE' THEN 1 ELSE 0 END) as active_count,
+                SUM(CASE WHEN UPPER(e.employment_status) = 'INACTIVE' THEN 1 ELSE 0 END) as inactive_count
             FROM departments d
             LEFT JOIN employees e ON e.department_id = d.id
             GROUP BY d.id, d.name
@@ -84,6 +101,7 @@ async def get_headcount_by_department() -> list[dict[str, Any]]:
                 "department": r["department"],
                 "total_headcount": r["total_headcount"],
                 "active_count": r["active_count"],
+                "inactive_count": r["inactive_count"],
             }
             for r in rows
         ]
@@ -251,6 +269,44 @@ async def get_payroll_summary() -> dict[str, Any]:
 
 
 # Export catalog of all tools
+
+
+@tool
+async def get_total_employee_count() -> dict[str, Any]:
+    """
+    Returns accurate total employee counts broken down by employment status.
+    Use this when asked: 'how many employees do we have', 'total headcount', 'how many active employees',
+    'employee count', 'staff count', 'how many staff'.
+    Always use this tool first for any headcount/total count question to ensure accuracy.
+    """
+    async with get_db_connection() as conn:
+        cursor = await conn.execute(
+            """
+            SELECT 
+                employment_status,
+                COUNT(*) as count
+            FROM employees
+            GROUP BY employment_status
+            """
+        )
+        rows = await cursor.fetchall()
+        breakdown = {r["employment_status"]: r["count"] for r in rows}
+        total = sum(breakdown.values())
+
+        cursor2 = await conn.execute("SELECT COUNT(DISTINCT department_id) as dept_count FROM employees WHERE UPPER(employment_status) = 'ACTIVE'")
+        dept_row = await cursor2.fetchone()
+
+        return {
+            "total_employees": total,
+            "active": breakdown.get("ACTIVE", breakdown.get("active", 0)),
+            "inactive": breakdown.get("INACTIVE", breakdown.get("inactive", 0)),
+            "on_leave": breakdown.get("ON_LEAVE", breakdown.get("on_leave", 0)),
+            "terminated": breakdown.get("TERMINATED", breakdown.get("terminated", 0)),
+            "other_statuses": {k: v for k, v in breakdown.items() if k.upper() not in ("ACTIVE", "INACTIVE", "ON_LEAVE", "TERMINATED")},
+            "active_departments_count": dept_row["dept_count"] if dept_row else 0,
+        }
+
+
 ALL_DB_TOOLS = [
     get_all_employees,
     get_headcount_by_department,
@@ -258,4 +314,6 @@ ALL_DB_TOOLS = [
     get_attendance_summary,
     get_leave_balances,
     get_payroll_summary,
+    get_total_employee_count,
 ]
+
