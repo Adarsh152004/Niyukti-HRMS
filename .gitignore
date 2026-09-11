@@ -78,8 +78,7 @@ logs/
 node_modules/
 .next/
 dist/
-openwa_gateway/data/
-openwa_gateway/dist/
+openwa_gateway/
 azyntrix/dist/
 
 # Database
