@@ -1,23 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Mic, MicOff, Sparkles, RefreshCw, Maximize2, Minimize2, Bot,
-  ArrowUpRight, CheckCircle2, User, Building2, Zap, Clock
+  ArrowUpRight, CheckCircle2, Clock, Trash2, Check
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ChatGPTMarkdownRenderer } from "@/components/chat/ChatGPTMarkdownRenderer";
-import { ArtifactCard, ArtifactData, ApprovalRequestData } from '@/components/chat/ArtifactCard';
-import { WidgetRegistry } from '@/components/chat/widgets/WidgetRegistry';
 
 interface StructuredData {
   intent?: string;
   decision?: string;
   summary?: string;
   markdown_answer?: string;
-  widgets?: any[];
-  artifact?: ArtifactData;
-  approval_request?: ApprovalRequestData;
   workflow_id?: string;
   suggested_prompts?: string[];
+  approval_request?: {
+    id: string;
+    workflow_id: string;
+    status: string;
+    action_type?: string;
+    action_required?: string;
+  };
+  artifact?: {
+    id: string;
+    title: string;
+    type: string;
+    version: number;
+    content: any;
+    status: string;
+  };
 }
 
 interface Message {
@@ -32,7 +42,7 @@ interface Message {
 const DEFAULT_PROMPTS = [
   "Check headcount distribution across all departments",
   "Show attendance summary for today",
-  "Recruit a senior engineer for engineering team",
+  "Draft a job opening for Senior Frontend Engineer",
   "List active employees in our company"
 ];
 
@@ -43,7 +53,6 @@ export function CEOMobileChatPage() {
   const [isListening, setIsListening] = useState(false);
   const [dynamicPrompts, setDynamicPrompts] = useState<string[]>(DEFAULT_PROMPTS);
   const [isFrameMode, setIsFrameMode] = useState(true);
-  const [timeContext, setTimeContext] = useState<any>(null);
   const [feedbackInput, setFeedbackInput] = useState<{ [workflowId: string]: string }>({});
   const [revisingId, setRevisingId] = useState<string | null>(null);
 
@@ -57,9 +66,6 @@ export function CEOMobileChatPage() {
         const data = await res.json();
         if (data.suggested_prompts?.length) {
           setDynamicPrompts(data.suggested_prompts);
-        }
-        if (data.time_context) {
-          setTimeContext(data.time_context);
         }
       }
     } catch (e) {
@@ -98,7 +104,7 @@ export function CEOMobileChatPage() {
           setMessages([{
             id: 'welcome-1',
             sender: 'ai',
-            text: "Hello! I am your AI Executive Workforce Assistant connected directly to your live database. Ask me anything about headcount, attendance, payroll, hiring, or issue workflow commands.",
+            text: "Hello! I am your AI HR & Workforce Assistant connected directly to your live database. Ask me anything about headcount, attendance, payroll, or issue workflow commands.",
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             suggested_prompts: dynamicPrompts
           }]);
@@ -189,6 +195,17 @@ export function CEOMobileChatPage() {
     }
   };
 
+  const handleClearChat = async () => {
+    try {
+      await fetch('/api/v1/chat/messages', { method: 'DELETE' });
+      await fetch('/api/v1/orchestration/clear', { method: 'POST' });
+      setMessages([]);
+      await fetchUnifiedMessages();
+    } catch (e) {
+      console.error('Failed to clear chat:', e);
+    }
+  };
+
   const handleSend = async (textToSend?: string) => {
     const query = (textToSend || input).trim();
     if (!query || isLoading) return;
@@ -241,22 +258,22 @@ export function CEOMobileChatPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 md:p-4 font-sans selection:bg-emerald-500 selection:text-black">
-      <div className={`w-full ${isFrameMode ? 'max-w-md h-[92vh] border border-slate-800 rounded-3xl shadow-2xl overflow-hidden' : 'h-screen'} bg-slate-900 flex flex-col relative`}>
+    <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col items-center justify-center p-0 md:p-4 font-sans selection:bg-emerald-100 selection:text-emerald-900">
+      <div className={`w-full ${isFrameMode ? 'max-w-md h-[92vh] border border-slate-200 rounded-3xl shadow-xl overflow-hidden' : 'h-screen'} bg-white flex flex-col relative`}>
         
-        {/* Header */}
-        <div className="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between z-10 shrink-0">
+        {/* Light Theme Header */}
+        <div className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center justify-between z-10 shrink-0 shadow-xs">
           <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <div className="w-8 h-8 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
               <Bot className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center space-x-1.5">
-                <span className="font-semibold text-sm tracking-tight text-white">HRMS AI Assistant</span>
+                <span className="font-semibold text-sm tracking-tight text-slate-900">HRMS AI Assistant</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               </div>
-              <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                {timeContext?.period ? <span className="capitalize text-emerald-400 font-medium">{timeContext.period} Sync</span> : 'Live Sync'} • Database Active
+              <p className="text-[10px] text-slate-500 flex items-center gap-1">
+                Database Live • Online
               </p>
             </div>
           </div>
@@ -264,14 +281,21 @@ export function CEOMobileChatPage() {
           <div className="flex items-center space-x-1">
             <button 
               onClick={() => fetchUnifiedMessages()}
-              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition"
               title="Sync Chat"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
             <button 
+              onClick={handleClearChat}
+              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-red-600 transition"
+              title="Clear History"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button 
               onClick={() => setIsFrameMode(!isFrameMode)}
-              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition"
               title="Toggle Frame Mode"
             >
               {isFrameMode ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
@@ -280,73 +304,73 @@ export function CEOMobileChatPage() {
         </div>
 
         {/* Message Stream */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
           {messages.map((msg, idx) => {
             const isUser = msg.sender === 'user';
             const sData = msg.structured_data;
-            const approvalReq = sData?.approval_request || (msg as any).approval_request;
-            const workflowId = sData?.workflow_id || (msg as any).workflow_id || approvalReq?.workflow_id;
+            const approvalReq = sData?.approval_request;
+            const workflowId = sData?.workflow_id || approvalReq?.workflow_id;
             const isPendingApproval = approvalReq?.status === 'PENDING';
 
             return (
               <motion.div
                 key={msg.id || idx}
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
               >
                 <div
-                  className={`max-w-[94%] rounded-2xl px-4 py-3 text-xs leading-relaxed space-y-2 ${
+                  className={`max-w-[92%] rounded-2xl px-4 py-3 text-xs leading-relaxed space-y-2 ${
                     isUser
-                      ? 'bg-emerald-600 text-white rounded-br-xs shadow-md'
-                      : 'bg-slate-800/90 border border-slate-700/60 text-slate-200 rounded-bl-xs shadow-md'
+                      ? 'bg-emerald-600 text-white rounded-br-xs shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-800 rounded-bl-xs shadow-xs'
                   }`}
                 >
-                  {/* Clean humanoid markdown answer */}
+                  {/* Clean conversational markdown */}
                   {isUser ? (
                     <div className="whitespace-pre-wrap leading-relaxed text-[13px]">{msg.text}</div>
                   ) : (
-                    <div className="text-[13px] leading-relaxed">
+                    <div className="text-[13px] leading-relaxed text-slate-800">
                       <ChatGPTMarkdownRenderer content={msg.text} />
                     </div>
                   )}
 
-                  {/* Clean inline HITL Approval bar when action is required */}
+                  {/* Clean Simple Inline HITL Approval Box */}
                   {!isUser && isPendingApproval && workflowId && (
-                    <div className="mt-3 pt-3 border-t border-slate-700/60 flex flex-col gap-2">
-                      <div className="flex items-center justify-between text-[11px] text-amber-400 font-medium">
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-200 flex flex-col gap-2 bg-slate-50 p-2.5 rounded-xl">
+                      <div className="flex items-center justify-between text-[11px] text-amber-700 font-medium">
                         <span className="flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 animate-pulse" />
+                          <Clock className="w-3.5 h-3.5 animate-pulse text-amber-600" />
                           Approval Required: {approvalReq?.action_type || 'Workflow Action'}
                         </span>
                       </div>
                       
                       {revisingId === workflowId ? (
-                        <div className="flex flex-col gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700">
+                        <div className="flex flex-col gap-2 bg-white p-2 rounded-lg border border-slate-200">
                           <input
                             type="text"
                             placeholder="Type revision notes..."
                             value={feedbackInput[workflowId] || ''}
                             onChange={(e) => setFeedbackInput({ ...feedbackInput, [workflowId]: e.target.value })}
-                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500"
                           />
                           <div className="flex gap-1.5 justify-end">
                             <button
                               onClick={() => setRevisingId(null)}
-                              className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px]"
+                              className="px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:text-slate-900 text-[11px]"
                             >
                               Cancel
                             </button>
                             <button
                               onClick={() => handleRevise(workflowId, feedbackInput[workflowId] || '')}
-                              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium text-[11px]"
+                              className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-medium text-[11px]"
                             >
                               Submit Revision
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 pt-0.5">
                           <button
                             onClick={() => handleApprove(workflowId)}
                             className="flex-1 py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px] flex items-center justify-center gap-1.5 transition shadow-xs"
@@ -356,7 +380,7 @@ export function CEOMobileChatPage() {
                           </button>
                           <button
                             onClick={() => setRevisingId(workflowId)}
-                            className="py-1.5 px-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-[11px] flex items-center justify-center gap-1.5 transition"
+                            className="py-1.5 px-3 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium text-[11px] flex items-center justify-center gap-1.5 transition shadow-xs"
                           >
                             Request Revision
                           </button>
@@ -365,29 +389,7 @@ export function CEOMobileChatPage() {
                     </div>
                   )}
 
-                  {/* Interactive Structured Widgets */}
-                  {!isUser && (((msg as any).widgets && (msg as any).widgets.length > 0) || (sData?.widgets && sData.widgets.length > 0)) && (
-                    <div className="space-y-3 mt-3 text-left w-full">
-                      {((msg as any).widgets || sData?.widgets || []).map((w: any, wIdx: number) => (
-                        <WidgetRegistry key={wIdx} widget={w} />
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Artifact Card (Job Descriptions, Offers, Plans with Approval Gates) */}
-                  {!isUser && (sData?.artifact || (msg as any).artifact) && (
-                    <div className="mt-3 text-left">
-                      <ArtifactCard
-                        artifact={sData?.artifact || (msg as any).artifact}
-                        approvalRequest={sData?.approval_request || (msg as any).approval_request}
-                        workflowId={sData?.workflow_id || (msg as any).workflow_id}
-                        onApprove={handleApprove}
-                        onRevise={handleRevise}
-                      />
-                    </div>
-                  )}
-
-                  <div className={`text-[9px] pt-1 text-right ${isUser ? 'text-emerald-200/80' : 'text-slate-400'}`}>
+                  <div className={`text-[10px] pt-1 text-right ${isUser ? 'text-emerald-100' : 'text-slate-400'}`}>
                     {msg.timestamp}
                   </div>
                 </div>
@@ -396,25 +398,25 @@ export function CEOMobileChatPage() {
           })}
 
           {isLoading && (
-            <div className="flex items-center space-x-2 text-xs text-slate-400 bg-slate-800/50 border border-slate-700/40 rounded-xl px-3 py-2 w-fit">
-              <Sparkles className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-              <span>Synthesizing response...</span>
+            <div className="flex items-center space-x-2 text-xs text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2 w-fit shadow-xs">
+              <Sparkles className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+              <span>Thinking...</span>
             </div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Suggested Prompts */}
-        <div className="px-3 py-2 bg-slate-900/95 border-t border-slate-800 overflow-x-auto scrollbar-none flex items-center gap-1.5 shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap flex items-center gap-1">
-            <Sparkles className="w-2.5 h-2.5 text-emerald-400" /> Quick Prompts:
+        {/* Quick Prompts Bar */}
+        <div className="px-3 py-2 bg-white border-t border-slate-200 overflow-x-auto scrollbar-none flex items-center gap-1.5 shrink-0">
+          <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap flex items-center gap-1">
+            <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> Suggestions:
           </span>
           {dynamicPrompts.map((prompt, i) => (
             <button
               key={i}
               onClick={() => handleSend(prompt)}
-              className="text-[11px] whitespace-nowrap bg-slate-800 hover:bg-slate-700 border border-slate-700/80 text-slate-300 hover:text-white rounded-full px-3 py-1 transition flex items-center gap-1 shadow-xs"
+              className="text-[11px] whitespace-nowrap bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 hover:text-slate-900 rounded-full px-3 py-1 transition flex items-center gap-1 shadow-xs"
             >
               <span>{prompt}</span>
               <ArrowUpRight className="w-2.5 h-2.5 text-slate-400" />
@@ -422,12 +424,12 @@ export function CEOMobileChatPage() {
           ))}
         </div>
 
-        {/* Input Bar */}
-        <div className="p-3 bg-slate-900 border-t border-slate-800 flex items-center space-x-2 shrink-0">
+        {/* Light Theme Input Bar */}
+        <div className="p-3 bg-white border-t border-slate-200 flex items-center space-x-2 shrink-0">
           <button
             onClick={toggleListening}
             className={`p-2.5 rounded-full transition ${
-              isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-100 text-slate-600 hover:text-slate-900'
             }`}
           >
             {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -438,14 +440,14 @@ export function CEOMobileChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={isListening ? 'Listening...' : 'Type your message...'}
-            className="flex-1 bg-slate-800 border border-slate-700 rounded-full px-4 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+            placeholder={isListening ? 'Listening...' : 'Type a message...'}
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-4 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white transition"
           />
 
           <button
             onClick={() => handleSend()}
             disabled={!input.trim() || isLoading}
-            className="p-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-full transition shadow-sm"
+            className="p-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-full transition shadow-xs"
           >
             <Send className="w-4 h-4" />
           </button>

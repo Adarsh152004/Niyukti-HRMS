@@ -1493,40 +1493,20 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
             lines = [
                 "### Executive Headcount & Workforce Distribution",
                 "",
-                f"Our active workforce currently stands at **{total_active} full-time employees** distributed across **{len(dept_rows)} departments**. All personnel are actively provisioned in the core SQLite database with zero unassigned accounts.",
-                "",
-                "| Department | Headcount | Distribution | Primary Operational Focus |",
-                "| :--- | :---: | :---: | :--- |"
+                f"We currently have **{total_active} active full-time employees** across **{len(dept_rows)} departments**.\n",
+                "**Department Breakdown:**"
             ]
-            
-            focus_map = {
-                "AI & Data Science": "LLM fine-tuning, autonomous agent architectures",
-                "Platform Engineering": "Core backend services, SQLite persistence & scalability",
-                "Product & Design": "Enterprise OS UX, executive mobile experiences",
-                "Client Success & Sales": "Enterprise accounts, client deployments",
-                "Executive Leadership": "Corporate strategy & capital allocation",
-                "Finance & Legal": "Payroll compliance, fiscal oversight & regulatory audits",
-                "HR & Operations": "Talent acquisition, employee lifecycle & policies",
-                "Quality Assurance & DevOps": "Automated regression testing, CI/CD pipeline reliability"
-            }
             
             for d in dept_rows:
                 d_name = d.get("name", "General")
                 cnt = d.get("headcount", 0)
-                pct = round((cnt / total_active * 100), 1) if total_active > 0 else 0
-                focus = focus_map.get(d_name, "Core departmental operations")
-                lines.append(f"| **{d_name}** | {cnt} | {pct}% | {focus} |")
+                lines.append(f"• **{d_name}**: {cnt} employees")
                 
             open_jobs_cnt = len(db_ctx.get("job_openings", []))
             lines.extend([
                 "",
-                "#### Key Workforce Metrics",
-                f"* **Total Active Headcount**: {total_active} Full-Time Equivalent (FTE) employees",
-                "* **Employment Type Ratio**: 100% Full-Time, 0 Contractors / Interns",
-                "* **Technical Engineering Density**: 54.5% across AI, Platform, and QA",
-                f"* **Active Talent Requisitions**: {open_jobs_cnt} approved job openings currently in recruitment pipeline",
-                "",
-                "Would you like to initiate a new job requisition, review open candidate applications, or drill down into a specific team?"
+                f"• **Open Positions**: {open_jobs_cnt} active requisitions",
+                f"• **Workforce Status**: All employees active with zero compliance anomalies."
             ])
             markdown_answer = "\n".join(lines)
             provider_used = "Workforce-Intelligence-Agent"
@@ -2239,4 +2219,12 @@ async def clear_orchestration_history():
     WORKFLOW_HISTORY.clear()
     WORKFLOW_DETAILS.clear()
     ARTIFACT_STORE.clear()
+    try:
+        conn = sqlite3.connect(get_orchestration_db_path())
+        c = conn.cursor()
+        c.execute("DELETE FROM orchestration_workflows")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Error clearing orchestration_workflows in SQLite: {e}")
     return {"status": "success", "message": "Orchestration history cleared successfully"}

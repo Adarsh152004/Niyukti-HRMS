@@ -204,7 +204,7 @@ async def clear_chat_history() -> Dict[str, str]:
     deleted_cloud = False
     if SUPABASE_SERVICE_ROLE_KEY:
         try:
-            url = f"{SUPABASE_URL}/rest/v1/chat_messages?session_id=eq.default_session"
+            url = f"{SUPABASE_URL}/rest/v1/chat_messages?id=neq.00000000-0000-0000-0000-000000000000"
             headers = {**HEADERS, "Prefer": "count=exact"}
             async with httpx.AsyncClient(timeout=6.0) as client:
                 res = await client.delete(url, headers=headers)

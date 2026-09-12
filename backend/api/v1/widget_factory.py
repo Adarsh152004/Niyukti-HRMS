@@ -245,72 +245,9 @@ async def build_response_envelope(
     if approval_request:
         artifacts.append(approval_request)
 
-    # Detect Headcount intent
-    is_headcount = any(k in q_lower for k in [
-        "headcount", "how many employee", "staff count", "total employee",
-        "workforce", "department breakdown", "team size", "active staff"
-    ])
-
-    # Detect Attendance intent
-    is_attendance = any(k in q_lower for k in [
-        "attendance", "clock in", "check in", "who is present", "absent",
-        "punched in", "attendance rate", "leave today"
-    ])
-
-    # Detect Payroll intent
-    is_payroll = any(k in q_lower for k in [
-        "payroll", "salary", "payout", "compensation", "disburse", "payslip"
-    ])
-
-    # Detect Recruitment intent
-    is_recruitment = any(k in q_lower for k in [
-        "hire", "hiring", "recruit", "job opening", "candidate", "vacancy", "open position", "requisition"
-    ])
-
-    # Build appropriate typed widgets
-    if is_headcount:
-        w_headcount = await build_headcount_widget(db_ctx, org_id)
-        widgets.append(w_headcount)
-        actions.append(ActionPayload(
-            action_type="NAVIGATE",
-            action_id="nav-employees",
-            label="View Employee Directory",
-            endpoint="/employees",
-            method="GET",
-        ))
-
-    if is_attendance:
-        w_att = await build_attendance_widget(db_ctx, org_id)
-        widgets.append(w_att)
-        actions.append(ActionPayload(
-            action_type="NAVIGATE",
-            action_id="nav-attendance",
-            label="Open Attendance Dashboard",
-            endpoint="/attendance",
-            method="GET",
-        ))
-
-    if is_payroll and not artifact:
-        w_pay = await build_payroll_widget(db_ctx, org_id)
-        widgets.append(w_pay)
-        actions.append(ActionPayload(
-            action_type="NAVIGATE",
-            action_id="nav-payroll",
-            label="Review Payroll Runs",
-            endpoint="/payroll",
-            method="GET",
-        ))
-
-    if is_recruitment and not artifact:
-        w_rec = await build_recruitment_widget(db_ctx, org_id)
-        widgets.append(w_rec)
-        actions.append(ActionPayload(
-            action_type="NAVIGATE",
-            action_id="nav-recruitment",
-            label="Manage Open Requisitions",
-            endpoint="/recruitment",
-            method="GET",
-        ))
+    # Keep chat response simple, clean, and conversational without forcing large visual widget cards
+    widgets = []
+    actions = []
 
     # Clean executive text
     clean_text = clean_conversational_text(raw_markdown, widgets)
