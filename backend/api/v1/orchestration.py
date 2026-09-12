@@ -1095,6 +1095,7 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
     workflow_status = "COMPLETED"
     decision = "INFORMATIONAL"
     collaboration_chain: List[str] = []
+    nodes: List[WorkflowNode] = []
 
     # ----------------------------------------------------
     # BRANCH 1: JOB DESCRIPTION (Existing, Preserved 100%)
@@ -1470,10 +1471,32 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
         provider_used = "Gmail-Integration-Agent"
         decision = "INFORMATIONAL"
         n4_ms = 220
+        nodes = [
+            WorkflowNode(
+                id="node-1",
+                label="Email Request Ingestion",
+                subtitle=f"Recipient: {target_email}",
+                type="input",
+                status="completed",
+                execution_time_ms=12,
+                agent_role="Executive Partner (Nova)",
+                outputs={"recipient": target_email}
+            ),
+            WorkflowNode(
+                id="node-2",
+                label="Google Workspace OAuth2 Dispatch",
+                subtitle="Dispatched RFC 2822 payload via Gmail API",
+                type="output",
+                status="completed",
+                execution_time_ms=220,
+                agent_role="Gmail Integration Agent",
+                outputs={"status": "Delivered"}
+            )
+        ]
 
     elif is_email_check_request:
         try:
-            msgs = await gmail_client.list_messages(query="label:INBOX", max_results=5)
+            msgs = await gmail_client.list_messages(query="", max_results=5)
             if not msgs:
                 markdown_answer = "Your Gmail inbox is currently clear or no recent messages matched the search."
             else:
@@ -1496,6 +1519,18 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
         provider_used = "Gmail-Integration-Agent"
         decision = "INFORMATIONAL"
         n4_ms = 180
+        nodes = [
+            WorkflowNode(
+                id="node-1",
+                label="Gmail Inbox Ingestion",
+                subtitle="Connected to Google OAuth2 API",
+                type="input",
+                status="completed",
+                execution_time_ms=12,
+                agent_role="Gmail Integration Agent",
+                outputs={"status": "Synced"}
+            )
+        ]
 
     # ----------------------------------------------------
     # BRANCH 5: STANDARD INFORMATIONAL QUERY (Preserved)
