@@ -62,6 +62,7 @@ from backend.api.v1 import (
     skills,
     audit_api,
     ml_api,
+    gmail_api,
 )
 from backend.commands.api.router import approvals_router
 from backend.commands.api.router import router as commands_router
@@ -203,6 +204,7 @@ app.include_router(employee_360.router)
 app.include_router(executive.router)
 app.include_router(audit_api.router, prefix="/api/v1")
 app.include_router(ml_api.router, prefix="/api/v1")
+app.include_router(gmail_api.router, prefix="/api/v1")
 
 # Intelligence, Memory & ML
 app.include_router(knowledge_router)

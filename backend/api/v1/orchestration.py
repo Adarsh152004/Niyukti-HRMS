@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 
 from backend.api.v1.chat_api import save_chat_message
 from backend.ai.self_rag_engine import execute_self_rag
+from backend.integrations.gmail_client import gmail_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/orchestration", tags=["Agent Orchestration"])
@@ -1082,7 +1083,9 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
     is_payroll_request = any(k in q_lower for k in ["payroll", "payout", "disburse salary", "compensation audit", "tax withholding"])
     is_offer_request = any(k in q_lower for k in ["offer letter", "create offer", "draft offer", "generate offer", "extend offer", "offer package", "offer proposal"])
     is_leave_request = any(k in q_lower for k in ["leave request", "pto request", "vacation request", "leave exception", "approve leave"])
-    is_jd_request = (not is_payroll_request and not is_offer_request and not is_leave_request) and (
+    is_email_send_request = any(k in q_lower for k in ["send email", "send an email", "email to", "mail to", "dispatch email", "write an email", "shoot an email"])
+    is_email_check_request = not is_email_send_request and any(k in q_lower for k in ["check email", "check emails", "unread emails", "inbox", "my emails", "recent emails", "list emails", "read emails", "check gmail", "my inbox"])
+    is_jd_request = (not is_payroll_request and not is_offer_request and not is_leave_request and not is_email_send_request and not is_email_check_request) and (
         any(k in q_lower for k in ["jd", "job description", "create a jd", "draft a jd", "post a jd", "hiring requisition", "open a role", "new requisition", "create jd", "draft jd", "job opening", "open opening", "post opening", "draft opening", "create opening", "hire", "hiring", "recruit", "recruitment", "new role"]) or 
         (any(k in q_lower for k in ["hire", "hiring", "recruit", "recruitment"]) and any(k in q_lower for k in ["engineer", "developer", "designer", "manager", "intern", "staff", "role", "lead", "architect", "sre"]))
     )
@@ -1432,6 +1435,67 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
                 outputs={"status": "Awaiting Step 04 Approval"}
             )
         ]
+
+    # ----------------------------------------------------
+    # BRANCH 4B: GMAIL DISPATCH & INBOX OPERATIONS
+    # ----------------------------------------------------
+    elif is_email_send_request:
+        emails_found = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", req.query)
+        target_email = emails_found[0] if emails_found else "adarshyt1504@gmail.com"
+        
+        subject = "HR & Workforce Update from Azyntrix"
+        m_sub = re.search(r"subject[:\s]+([^,\.\n]+)", req.query, re.IGNORECASE)
+        if m_sub:
+            subject = m_sub.group(1).strip()
+            
+        body = f"Hello,\n\nThis is an authorized communication from the Azyntrix HR & Workforce System.\n\nQuery: {req.query}\n\nBest regards,\nHR Executive & People Operations Team"
+        
+        try:
+            send_res = await gmail_client.send_email(
+                to_email=target_email,
+                subject=subject,
+                body=body
+            )
+            markdown_answer = (
+                f"### Email Sent Successfully via Real Gmail API\n\n"
+                f"* **Recipient**: `{target_email}`\n"
+                f"* **Subject**: **{subject}**\n"
+                f"* **Message ID**: `{send_res.get('message_id')}`\n"
+                f"* **Authenticated Account**: `{gmail_client.sender_email}`\n\n"
+                f"The message was delivered using your authorized Google Workspace OAuth2 credentials."
+            )
+        except Exception as e:
+            markdown_answer = f"Failed to send email via Gmail API: {str(e)}"
+            
+        provider_used = "Gmail-Integration-Agent"
+        decision = "INFORMATIONAL"
+        n4_ms = 220
+
+    elif is_email_check_request:
+        try:
+            msgs = await gmail_client.list_messages(query="label:INBOX", max_results=5)
+            if not msgs:
+                markdown_answer = "Your Gmail inbox is currently clear or no recent messages matched the search."
+            else:
+                lines = [
+                    f"### Recent Messages in Gmail Inbox ({gmail_client.sender_email})",
+                    "",
+                    "Here are the latest messages retrieved via your real Gmail connection:",
+                    ""
+                ]
+                for idx, m in enumerate(msgs, 1):
+                    sender = m.get("from", "Unknown")
+                    subj = m.get("subject", "(No Subject)")
+                    snippet = m.get("snippet", "")
+                    date = m.get("date", "")
+                    lines.append(f"{idx}. **{subj}**\n   * **From**: `{sender}` · *{date}*\n   * **Snippet**: *\"{snippet}\"*\n")
+                markdown_answer = "\n".join(lines)
+        except Exception as e:
+            markdown_answer = f"Failed to query Gmail inbox: {str(e)}"
+            
+        provider_used = "Gmail-Integration-Agent"
+        decision = "INFORMATIONAL"
+        n4_ms = 180
 
     # ----------------------------------------------------
     # BRANCH 5: STANDARD INFORMATIONAL QUERY (Preserved)
