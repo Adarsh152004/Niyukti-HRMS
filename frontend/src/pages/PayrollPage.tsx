@@ -5,13 +5,19 @@ import { PageHeader, Card, CardHeader, CardTitle, MetricCard } from '@/component
 import { Button } from '@/components/ui/button';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { withDataProvider } from '@/providers/data-provider';
+import { apiClient } from '@/api/client';
 import { DEMO_EMPLOYEES } from '@/fixtures';
 
 export function PayrollPage() {
   const { data: employees } = useQuery({
     queryKey: ['payroll-employees'],
-    queryFn: () => withDataProvider(async () => { throw new Error(); }, DEMO_EMPLOYEES),
+    queryFn: async () => {
+      try {
+        const res = await apiClient<{ data: any[] }>('/employees');
+        if (res?.data && res.data.length > 0) return res.data;
+      } catch {}
+      return DEMO_EMPLOYEES;
+    },
   });
 
   return (

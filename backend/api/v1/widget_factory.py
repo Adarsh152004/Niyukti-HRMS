@@ -193,7 +193,7 @@ async def build_recruitment_widget(db_ctx: dict[str, Any], org_id: str = "org-no
             r = await c.fetchone()
             candidate_count = r["cnt"] if r else 0
 
-        async with db.execute("SELECT title, department_id, openings_count, status FROM job_openings ORDER BY created_at DESC LIMIT 4") as c:
+        async with db.execute("SELECT title, department_id, status FROM job_openings ORDER BY created_at DESC LIMIT 4") as c:
             openings = [dict(row) for row in await c.fetchall()]
 
     return WidgetPayload(

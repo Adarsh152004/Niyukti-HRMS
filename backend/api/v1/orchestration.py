@@ -175,6 +175,41 @@ def save_workflow_to_state(wf_dict: Dict[str, Any]):
     WORKFLOW_HISTORY.insert(0, wf_dict)
     persist_workflow(wf_dict)
 
+def _get_or_load_workflow(workflow_id: str) -> Optional[Dict[str, Any]]:
+    global WORKFLOW_DETAILS
+    if workflow_id in WORKFLOW_DETAILS:
+        return WORKFLOW_DETAILS[workflow_id]
+    
+    db_path = get_orchestration_db_path()
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM orchestration_workflows WHERE query_id = ?", (workflow_id,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            wf = {
+                "query_id": row["query_id"],
+                "query": row["query"],
+                "initiator": row["initiator"],
+                "channel": row["channel"],
+                "timestamp": row["timestamp"],
+                "status": row["status"],
+                "duration_ms": row["duration_ms"],
+                "llm_provider": row["llm_provider"],
+                "decision": row["decision"],
+                "collaboration_chain": json.loads(row["collaboration_chain_json"]) if row["collaboration_chain_json"] else [],
+                "artifact": json.loads(row["artifact_json"]) if row["artifact_json"] else None,
+                "approval_request": json.loads(row["approval_request_json"]) if row["approval_request_json"] else None,
+                "nodes": json.loads(row["nodes_json"]) if row["nodes_json"] else [],
+            }
+            WORKFLOW_DETAILS[workflow_id] = wf
+            return wf
+    except Exception as e:
+        logger.warning(f"Error loading workflow {workflow_id} from SQLite: {e}")
+    return None
+
 def build_seed_workflows() -> List[Dict[str, Any]]:
     now = datetime.datetime.now(datetime.timezone.utc)
     ts1 = (now - datetime.timedelta(minutes=15)).isoformat()
@@ -1048,8 +1083,8 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
     is_offer_request = any(k in q_lower for k in ["offer letter", "create offer", "draft offer", "generate offer", "extend offer", "offer package", "offer proposal"])
     is_leave_request = any(k in q_lower for k in ["leave request", "pto request", "vacation request", "leave exception", "approve leave"])
     is_jd_request = (not is_payroll_request and not is_offer_request and not is_leave_request) and (
-        any(k in q_lower for k in ["jd", "job description", "create a jd", "draft a jd", "post a jd", "hiring requisition", "open a role", "new requisition"]) or 
-        (any(k in q_lower for k in ["hire", "hiring", "recruit", "recruitment"]) and any(k in q_lower for k in ["engineer", "developer", "designer", "manager", "intern", "staff", "role"]))
+        any(k in q_lower for k in ["jd", "job description", "create a jd", "draft a jd", "post a jd", "hiring requisition", "open a role", "new requisition", "create jd", "draft jd", "job opening", "open opening", "post opening", "draft opening", "create opening", "hire", "hiring", "recruit", "recruitment", "new role"]) or 
+        (any(k in q_lower for k in ["hire", "hiring", "recruit", "recruitment"]) and any(k in q_lower for k in ["engineer", "developer", "designer", "manager", "intern", "staff", "role", "lead", "architect", "sre"]))
     )
 
     artifact: Optional[ArtifactModel] = None
@@ -1624,6 +1659,7 @@ Tone & Autonomous Execution Rules:
 
     WORKFLOW_HISTORY.insert(0, wf_record.dict())
     WORKFLOW_DETAILS[run_id] = wf_record.dict()
+    save_workflow_to_state(wf_record.dict())
 
     envelope = await build_response_envelope(
         query=req.query,
@@ -1691,8 +1727,8 @@ async def stream_orchestration(req: OrchestrationExecuteRequest):
     is_offer_req = any(k in q_lower for k in ["offer letter", "create offer", "draft offer", "generate offer", "extend offer", "offer package", "offer proposal"])
     is_leave_req = any(k in q_lower for k in ["leave request", "pto request", "vacation request", "leave exception", "approve leave", "maternity leave", "apply leave", "apply for leave"])
     is_jd_req = (not is_payroll_req and not is_offer_req and not is_leave_req) and (
-        any(k in q_lower for k in ["jd", "job description", "create a jd", "draft a jd", "post a jd", "hiring requisition", "open a role", "new requisition", "create jd", "draft jd"]) or
-        (any(k in q_lower for k in ["hire", "hiring", "recruit", "recruitment"]) and any(k in q_lower for k in ["engineer", "developer", "designer", "manager", "intern", "staff", "role", "lead"]))
+        any(k in q_lower for k in ["jd", "job description", "create a jd", "draft a jd", "post a jd", "hiring requisition", "open a role", "new requisition", "create jd", "draft jd", "job opening", "open opening", "post opening", "draft opening", "create opening", "hire", "hiring", "recruit", "recruitment", "new role"]) or
+        (any(k in q_lower for k in ["hire", "hiring", "recruit", "recruitment"]) and any(k in q_lower for k in ["engineer", "developer", "designer", "manager", "intern", "staff", "role", "lead", "architect", "sre"]))
     )
     is_template_wf = any([
         "deterministic payroll" in q_lower or ("payroll" in q_lower and "workflow" in q_lower),
@@ -1904,7 +1940,7 @@ async def stream_orchestration(req: OrchestrationExecuteRequest):
 @router.post("/workflows/{workflow_id}/approve")
 async def approve_workflow_action(workflow_id: str):
     """Executes stateful human approval for an artifact across HR domains."""
-    wf = WORKFLOW_DETAILS.get(workflow_id)
+    wf = _get_or_load_workflow(workflow_id)
     if not wf:
         return {"status": "error", "message": f"Workflow {workflow_id} not found"}
 
@@ -2063,6 +2099,8 @@ async def approve_workflow_action(workflow_id: str):
             item["approval_request"] = wf.get("approval_request")
             break
 
+    save_workflow_to_state(wf)
+
     # Persist approval message to Chat History
     await save_chat_message(
         role="assistant",
@@ -2088,7 +2126,7 @@ async def approve_workflow_action(workflow_id: str):
 @router.post("/workflows/{workflow_id}/revise")
 async def revise_workflow_action(workflow_id: str, req: ApprovalActionRequest):
     """Revises artifact based on human feedback and resets to WAITING_FOR_APPROVAL."""
-    wf = WORKFLOW_DETAILS.get(workflow_id)
+    wf = _get_or_load_workflow(workflow_id)
     if not wf:
         return {"status": "error", "message": f"Workflow {workflow_id} not found"}
 
@@ -2146,6 +2184,8 @@ async def revise_workflow_action(workflow_id: str, req: ApprovalActionRequest):
             item["approval_request"] = approval_req.dict()
             break
 
+    save_workflow_to_state(wf)
+
     response_text = f"Updated the draft based on your feedback (v{new_version}). Please review the revised proposal below."
 
     if req.feedback:
@@ -2187,7 +2227,7 @@ async def get_orchestration_history():
 
 @router.get("/workflows/{query_id}")
 async def get_workflow_details(query_id: str):
-    wf = WORKFLOW_DETAILS.get(query_id)
+    wf = _get_or_load_workflow(query_id)
     if not wf:
         return {"error": f"Workflow {query_id} not found"}
     return wf

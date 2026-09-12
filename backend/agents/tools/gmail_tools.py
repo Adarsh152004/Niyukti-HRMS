@@ -1,17 +1,20 @@
 """
-Program 23 — Gmail MCP Server & HRMS Email Intelligence Tools.
+Gmail MCP Server & HRMS Real Email Intelligence Tools.
 
-Provides autonomous and interactive email capabilities for HRMS agents:
-- Search and query email threads (recruitment, candidate offers, compliance, executive notices)
-- Fetch and parse email message content and metadata
-- Compose and dispatch emails (candidate offers, interview invites, executive updates)
+Provides production email capabilities for HRMS agents:
+- Search and query real Google Gmail / Workspace messages and threads
+- Fetch and parse real email message content and metadata
+- Compose and dispatch RFC 2822 compliant emails via Gmail API or Gmail MCP Server
 - Ingest and flag priority unread emails for autonomous CEO reporting
+- Automatic OAuth2 token refreshing using client credentials
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
+import base64
+import email
+from email.mime.text import MIMEText
 import json
 import logging
 import os
@@ -73,252 +76,215 @@ class GmailProvider(ABC):
     async def get_status(self) -> dict[str, Any]: ...
 
 
-class MockGmailProvider(GmailProvider):
+class RealGmailOAuthProvider(GmailProvider):
     """
-    Enterprise Mock Gmail Provider.
-    Preloaded with realistic executive HR scenarios (VIP candidate acceptances, escalations, resignations).
-    """
-
-    def __init__(self):
-        self._messages: dict[str, GmailMessage] = {}
-        self._sent_messages: list[dict[str, Any]] = []
-        self._reported_ids: set[str] = set()
-        self._seed_initial_emails()
-
-    def _seed_initial_emails(self):
-        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        
-        sample_emails = [
-            GmailMessage(
-                id="msg-101",
-                thread_id="th-101",
-                sender="aarav.sharma@cloudtech.dev",
-                recipient="hr@apex-enterprise.com",
-                subject="Offer Acceptance: Staff Cloud Architect — Aarav Sharma",
-                body=(
-                    "Dear Apex Executive Team,\n\n"
-                    "I am thrilled to formally accept your offer for the Staff Cloud Architect position! "
-                    "I have reviewed the terms ($165,000 base + equity) and signed the attached agreement. "
-                    "My target start date is October 1st, 2026. Looking forward to joining the team.\n\n"
-                    "Best regards,\nAarav Sharma\n+91 98200 12345"
-                ),
-                snippet="I am thrilled to formally accept your offer for the Staff Cloud Architect position!",
-                timestamp=now_ts,
-                is_unread=True,
-                labels=["INBOX", "IMPORTANT", "RECRUITMENT", "OFFER_ACCEPTED"],
-                has_attachments=True,
-                priority_level="CRITICAL",
-            ),
-            GmailMessage(
-                id="msg-102",
-                thread_id="th-102",
-                sender="vikram.malhotra@apex-enterprise.com",
-                recipient="ceo@apex-enterprise.com",
-                subject="URGENT: Resignation Notice — Principal Frontend Architect",
-                body=(
-                    "Hi CEO & Leadership Team,\n\n"
-                    "Please accept this letter as formal notification that I am resigning from my position "
-                    "as Principal Frontend Architect. My last working day will be October 15th, 2026. "
-                    "I want to ensure a smooth transition of the UI design system before departure.\n\n"
-                    "Sincerely,\nVikram Malhotra"
-                ),
-                snippet="Please accept this letter as formal notification that I am resigning from my position...",
-                timestamp=now_ts,
-                is_unread=True,
-                labels=["INBOX", "IMPORTANT", "EXECUTIVE", "RESIGNATION"],
-                priority_level="CRITICAL",
-            ),
-            GmailMessage(
-                id="msg-103",
-                thread_id="th-103",
-                sender="compliance@labour-board.gov.in",
-                recipient="hr-legal@apex-enterprise.com",
-                subject="Statutory Compliance Audit Reminder Q3 2026",
-                body=(
-                    "Dear Employer,\n\n"
-                    "This is a formal reminder regarding the submission of your Q3 Equal Opportunity and "
-                    "Statutory Employee Welfare Compliance audit reports due by September 30, 2026. "
-                    "Ensure digital payroll registers are updated.\n\n"
-                    "Department of Labor & Compliance"
-                ),
-                snippet="Formal reminder regarding the submission of your Q3 Equal Opportunity audit...",
-                timestamp=now_ts,
-                is_unread=True,
-                labels=["INBOX", "COMPLIANCE", "LEGAL"],
-                priority_level="HIGH",
-            ),
-            GmailMessage(
-                id="msg-104",
-                thread_id="th-104",
-                sender="priya.nair@candidate.ai",
-                recipient="careers@azyntrix.com",
-                subject="Application Status Inquiry: Senior AI Research Engineer",
-                body=(
-                    "Hello Azyntrix Recruiting,\n\n"
-                    "I submitted my application for Senior AI Research Engineer last week and completed the "
-                    "initial screening. Could you please share an update on next interview rounds?\n\n"
-                    "Thanks,\nPriya Nair"
-                ),
-                snippet="I submitted my application for Senior AI Research Engineer last week...",
-                timestamp=now_ts,
-                is_unread=True,
-                labels=["INBOX", "RECRUITMENT"],
-                priority_level="NORMAL",
-            ),
-        ]
-        for m in sample_emails:
-            self._messages[m.id] = m
-
-    async def search_messages(self, query: str, max_results: int = 10) -> list[GmailMessage]:
-        q = query.lower().strip()
-        results: list[GmailMessage] = []
-        for m in self._messages.values():
-            if not q or (
-                q in m.subject.lower()
-                or q in m.body.lower()
-                or q in m.sender.lower()
-                or any(q in l.lower() for l in m.labels)
-            ):
-                results.append(m)
-                if len(results) >= max_results:
-                    break
-        return results
-
-    async def get_message(self, message_id: str) -> GmailMessage | None:
-        return self._messages.get(message_id)
-
-    async def send_message(self, to: str, subject: str, body: str, cc: list[str] | None = None) -> GmailSendResult:
-        msg_id = f"msg-out-{uuid.uuid4().hex[:8]}"
-        th_id = f"th-{uuid.uuid4().hex[:8]}"
-        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-        msg = GmailMessage(
-            id=msg_id,
-            thread_id=th_id,
-            sender=os.getenv("GMAIL_SENDER_EMAIL", "executive-assistant@apex-enterprise.com"),
-            recipient=to,
-            subject=subject,
-            body=body,
-            snippet=body[:80],
-            timestamp=now_ts,
-            is_unread=False,
-            labels=["SENT"],
-            priority_level="NORMAL",
-            reported_to_ceo=True,
-        )
-        self._messages[msg_id] = msg
-        self._sent_messages.append({"id": msg_id, "to": to, "subject": subject, "timestamp": now_ts})
-        
-        logger.info(f"[Gmail MCP] Outbound email sent to {to}: '{subject}'")
-        return GmailSendResult(success=True, message_id=msg_id, thread_id=th_id, timestamp=now_ts)
-
-    async def get_unread_important(self) -> list[GmailMessage]:
-        return [
-            m for m in self._messages.values()
-            if m.is_unread and not m.reported_to_ceo and m.priority_level in ("CRITICAL", "HIGH")
-        ]
-
-    async def mark_reported(self, message_id: str) -> bool:
-        if message_id in self._messages:
-            self._messages[message_id].reported_to_ceo = True
-            self._reported_ids.add(message_id)
-            return True
-        return False
-
-    async def get_status(self) -> dict[str, Any]:
-        return {
-            "provider": "mock_gmail",
-            "status": "LIVE",
-            "mailbox": os.getenv("GMAIL_SENDER_EMAIL", "ceo-inbox@apex-enterprise.com"),
-            "total_messages": len(self._messages),
-            "unread_count": sum(1 for m in self._messages.values() if m.is_unread),
-            "sent_count": len(self._sent_messages),
-        }
-
-
-class LiveGmailMCPProvider(GmailProvider):
-    """
-    Live Google Gmail MCP / API Provider.
-    Interacts with official Google Workspace Gmail API or Gmail MCP Server endpoint.
+    Production Google Gmail Provider using direct Google Workspace REST API
+    and OAuth2 refresh token flows.
     """
 
     def __init__(self):
-        self.api_url = os.getenv("GMAIL_MCP_URL", "https://gmail.googleapis.com/gmail/v1/users/me").rstrip("/")
+        self.api_url = os.getenv("GMAIL_API_URL", "https://gmail.googleapis.com/gmail/v1/users/me").rstrip("/")
+        self.mcp_url = os.getenv("GMAIL_MCP_URL", "").rstrip("/")
+        self.client_id = os.getenv("GMAIL_CLIENT_ID", "")
+        self.client_secret = os.getenv("GMAIL_CLIENT_SECRET", "")
+        self.refresh_token = os.getenv("GMAIL_REFRESH_TOKEN", "")
         self.access_token = os.getenv("GMAIL_ACCESS_TOKEN", "")
+        self.token_expiry: float = 0.0
         self.reported_ids: set[str] = set()
 
-    def _headers(self) -> dict[str, str]:
+    async def _ensure_access_token(self) -> str:
+        """Returns valid access token or refreshes it via Google OAuth2."""
+        now = time.time()
+        if self.access_token and now < self.token_expiry:
+            return self.access_token
+
+        if self.refresh_token and self.client_id and self.client_secret:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        "https://oauth2.googleapis.com/token",
+                        data={
+                            "client_id": self.client_id,
+                            "client_secret": self.client_secret,
+                            "refresh_token": self.refresh_token,
+                            "grant_type": "refresh_token",
+                        },
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        self.access_token = data.get("access_token", "")
+                        expires_in = data.get("expires_in", 3600)
+                        self.token_expiry = now + expires_in - 120
+                        logger.info("Successfully refreshed Google Gmail OAuth2 access token.")
+                        return self.access_token
+                    else:
+                        logger.warning(f"Failed to refresh Google OAuth token: {resp.status_code} {resp.text}")
+            except Exception as e:
+                logger.error(f"Error during OAuth refresh: {e}")
+
+        return self.access_token
+
+    def _auth_headers(self, token: str) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.access_token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
 
     async def search_messages(self, query: str, max_results: int = 10) -> list[GmailMessage]:
-        if not self.access_token:
-            return await MockGmailProvider().search_messages(query, max_results)
+        token = await self._ensure_access_token()
+        if not token:
+            logger.info("Gmail OAuth credentials not configured. Please set GMAIL_CLIENT_ID & GMAIL_REFRESH_TOKEN.")
+            return []
+
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                params = {"maxResults": max_results}
+                if query.strip():
+                    params["q"] = query.strip()
+                
                 resp = await client.get(
                     f"{self.api_url}/messages",
-                    headers=self._headers(),
-                    params={"q": query, "maxResults": max_results},
+                    headers=self._auth_headers(token),
+                    params=params,
                 )
                 if resp.status_code == 200:
                     items = resp.json().get("messages", [])
-                    res: list[GmailMessage] = []
-                    for it in items:
-                        m = await self.get_message(it["id"])
-                        if m:
-                            res.append(m)
-                    return res
+                    results: list[GmailMessage] = []
+                    for item in items:
+                        msg = await self.get_message(item["id"])
+                        if msg:
+                            results.append(msg)
+                    return results
+                else:
+                    logger.error(f"Gmail API search failed: {resp.status_code} {resp.text}")
         except Exception as e:
-            logger.error(f"[Gmail Live] Search error: {e}")
+            logger.error(f"Gmail search exception: {e}")
         return []
 
     async def get_message(self, message_id: str) -> GmailMessage | None:
-        if not self.access_token:
-            return await MockGmailProvider().get_message(message_id)
+        token = await self._ensure_access_token()
+        if not token:
+            return None
+
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{self.api_url}/messages/{message_id}", headers=self._headers())
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{self.api_url}/messages/{message_id}?format=full",
+                    headers=self._auth_headers(token),
+                )
                 if resp.status_code == 200:
-                    d = resp.json()
-                    snippet = d.get("snippet", "")
-                    headers = {h["name"].lower(): h["value"] for h in d.get("payload", {}).get("headers", [])}
+                    data = resp.json()
+                    payload = data.get("payload", {})
+                    headers_list = payload.get("headers", [])
+                    headers = {h["name"].lower(): h["value"] for h in headers_list}
+
+                    snippet = data.get("snippet", "")
+                    labels = data.get("labelIds", [])
+                    is_unread = "UNREAD" in labels
+                    
+                    # Extract body text
+                    body_text = snippet
+                    parts = payload.get("parts", [])
+                    if parts:
+                        for part in parts:
+                            if part.get("mimeType") == "text/plain":
+                                data_bytes = part.get("body", {}).get("data", "")
+                                if data_bytes:
+                                    try:
+                                        body_text = base64.urlsafe_b64decode(data_bytes + "==").decode("utf-8", errors="replace")
+                                    except Exception:
+                                        pass
+                                break
+
+                    # Assess priority
+                    subject = headers.get("subject", "No Subject")
+                    priority = "NORMAL"
+                    if "urgent" in subject.lower() or "critical" in subject.lower() or "offer" in subject.lower():
+                        priority = "CRITICAL"
+                    elif "IMPORTANT" in labels:
+                        priority = "HIGH"
+
                     return GmailMessage(
-                        id=d["id"],
-                        thread_id=d.get("threadId", ""),
+                        id=data["id"],
+                        thread_id=data.get("threadId", ""),
                         sender=headers.get("from", "unknown"),
                         recipient=headers.get("to", "unknown"),
-                        subject=headers.get("subject", "No Subject"),
-                        body=snippet,
+                        subject=subject,
+                        body=body_text,
                         snippet=snippet,
-                        timestamp=d.get("internalDate", ""),
-                        is_unread="UNREAD" in d.get("labelIds", []),
-                        labels=d.get("labelIds", []),
+                        timestamp=headers.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")),
+                        is_unread=is_unread,
+                        labels=labels,
+                        priority_level=priority,
                     )
         except Exception as e:
-            logger.error(f"[Gmail Live] Get message error: {e}")
+            logger.error(f"Gmail get_message exception for {message_id}: {e}")
         return None
 
     async def send_message(self, to: str, subject: str, body: str, cc: list[str] | None = None) -> GmailSendResult:
-        if not self.access_token:
-            return await MockGmailProvider().send_message(to, subject, body, cc)
-        # In live mode, encode raw RFC 2822 email payload
-        return GmailSendResult(success=True, message_id=f"gmail-live-{uuid.uuid4().hex[:8]}")
+        token = await self._ensure_access_token()
+        if not token:
+            return GmailSendResult(
+                success=False,
+                error="Gmail credentials not configured. Please set GMAIL_CLIENT_ID and GMAIL_REFRESH_TOKEN in .env"
+            )
+
+        try:
+            mime_msg = MIMEText(body)
+            mime_msg["to"] = to
+            mime_msg["subject"] = subject
+            if cc:
+                mime_msg["cc"] = ", ".join(cc)
+
+            raw_bytes = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode("utf-8")
+
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{self.api_url}/messages/send",
+                    headers=self._auth_headers(token),
+                    json={"raw": raw_bytes},
+                )
+                if resp.status_code == 200:
+                    res_data = resp.json()
+                    now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    return GmailSendResult(
+                        success=True,
+                        message_id=res_data.get("id", ""),
+                        thread_id=res_data.get("threadId", ""),
+                        timestamp=now_ts,
+                    )
+                else:
+                    return GmailSendResult(success=False, error=f"Gmail API Error: {resp.status_code} {resp.text}")
+        except Exception as e:
+            logger.error(f"Error sending email via Gmail API: {e}")
+            return GmailSendResult(success=False, error=str(e))
 
     async def get_unread_important(self) -> list[GmailMessage]:
-        return await self.search_messages("is:unread label:important", max_results=5)
+        return await self.search_messages("is:unread", max_results=5)
 
     async def mark_reported(self, message_id: str) -> bool:
         self.reported_ids.add(message_id)
+        token = await self._ensure_access_token()
+        if token:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        f"{self.api_url}/messages/{message_id}/modify",
+                        headers=self._auth_headers(token),
+                        json={"removeLabelIds": ["UNREAD"]},
+                    )
+            except Exception as e:
+                logger.warning(f"Could not mark unread on Gmail API: {e}")
         return True
 
     async def get_status(self) -> dict[str, Any]:
+        token = await self._ensure_access_token()
         return {
-            "provider": "gmail_live_mcp",
-            "status": "LIVE" if self.access_token else "FALLBACK_MOCK",
+            "provider": "google_workspace_gmail_real",
+            "status": "AUTHENTICATED" if token else "CREDENTIALS_REQUIRED",
             "endpoint": self.api_url,
+            "has_refresh_token": bool(self.refresh_token),
+            "reported_count": len(self.reported_ids),
         }
 
 
@@ -329,10 +295,7 @@ _provider_instance: GmailProvider | None = None
 def get_gmail_provider() -> GmailProvider:
     global _provider_instance
     if _provider_instance is None:
-        if os.getenv("GMAIL_ACCESS_TOKEN") or os.getenv("GMAIL_MCP_URL"):
-            _provider_instance = LiveGmailMCPProvider()
-        else:
-            _provider_instance = MockGmailProvider()
+        _provider_instance = RealGmailOAuthProvider()
     return _provider_instance
 
 
@@ -340,18 +303,20 @@ def get_gmail_provider() -> GmailProvider:
 # High-Level Agent Tool Functions (Bound into Multi-Agent Tool Catalogs)
 # ---------------------------------------------------------------------------
 
-
 async def search_emails(query: str = "", max_results: int = 5) -> str:
     """
     Search Gmail messages by keywords, sender, labels, or subject.
-    
-    Args:
-        query: Search keywords (e.g. 'offer acceptance', 'resignation', 'Aarav Sharma')
-        max_results: Max items to return (default 5)
     """
     provider = get_gmail_provider()
     msgs = await provider.search_messages(query=query, max_results=max_results)
     if not msgs:
+        status = await provider.get_status()
+        if status.get("status") == "CREDENTIALS_REQUIRED":
+            return (
+                "⚠️ Real Gmail integration is enabled, but credentials are not yet configured in .env.\n"
+                "Please configure GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN.\n"
+                "Refer to docs/GMAIL_MCP_SETUP_GUIDE.md for step-by-step instructions."
+            )
         return f"No emails found matching query: '{query}'."
 
     output = [f"📧 Found {len(msgs)} email(s) for query: '{query}':\n"]
@@ -369,14 +334,11 @@ async def search_emails(query: str = "", max_results: int = 5) -> str:
 async def get_email_thread(message_id: str) -> str:
     """
     Fetch the full body and details of a specific email message by ID.
-    
-    Args:
-        message_id: The unique message ID (e.g. 'msg-101')
     """
     provider = get_gmail_provider()
     msg = await provider.get_message(message_id=message_id)
     if not msg:
-        return f"Email message ID '{message_id}' not found."
+        return f"Email message ID '{message_id}' not found on server."
 
     return (
         f"📧 Email Details:\n"
@@ -395,19 +357,13 @@ async def get_email_thread(message_id: str) -> str:
 async def send_email(to: str, subject: str, body: str, cc: str | None = None) -> str:
     """
     Send an email on behalf of the executive assistant or HR team.
-    
-    Args:
-        to: Recipient email address
-        subject: Email subject line
-        body: Plain text email body
-        cc: Optional comma-separated CC recipients
     """
     provider = get_gmail_provider()
     cc_list = [c.strip() for c in cc.split(",") if c.strip()] if cc else None
     result = await provider.send_message(to=to, subject=subject, body=body, cc=cc_list)
     if result.success:
         return (
-            f"✅ Email successfully sent!\n"
+            f"✅ Email successfully dispatched via Gmail API!\n"
             f"To: {to}\n"
             f"Subject: {subject}\n"
             f"Message ID: {result.message_id}\n"

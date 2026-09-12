@@ -1,54 +1,23 @@
-import { ChatGPTMarkdownRenderer } from "@/components/chat/ChatGPTMarkdownRenderer";
-import { WidgetRegistry } from '@/components/chat/widgets/WidgetRegistry';
-import { ArtifactCard, ArtifactData, ApprovalRequestData } from '@/components/chat/ArtifactCard';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Mic, MicOff, Sparkles, RefreshCw, Maximize2, Minimize2, Bot,
-  TrendingUp, TrendingDown, Minus, ArrowUpRight, CheckCircle2, User, Building2, Zap, Clock,
-  Table as TableIcon, Search, Download
+  ArrowUpRight, CheckCircle2, User, Building2, Zap, Clock
 } from 'lucide-react';
-import { motion } from 'framer-motion';
-
-interface KeyMetric {
-  label: string;
-  value: string;
-  trend?: 'up' | 'down' | 'stable';
-  status?: 'normal' | 'success' | 'warning' | 'danger';
-}
-
-interface DetectedEntity {
-  type: string;
-  name: string;
-  id?: string;
-}
-
-interface RecommendedAction {
-  id: string;
-  label: string;
-  action_type: 'NAVIGATE' | 'QUERY' | 'TRIGGER_WORKFLOW';
-  target: string;
-}
-
-interface DataTableStructure {
-  title?: string;
-  columns: string[];
-  rows: Record<string, any>[];
-}
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChatGPTMarkdownRenderer } from "@/components/chat/ChatGPTMarkdownRenderer";
+import { ArtifactCard, ArtifactData, ApprovalRequestData } from '@/components/chat/ArtifactCard';
+import { WidgetRegistry } from '@/components/chat/widgets/WidgetRegistry';
 
 interface StructuredData {
   intent?: string;
   decision?: string;
   summary?: string;
   markdown_answer?: string;
-  key_metrics?: KeyMetric[];
-  entities_detected?: DetectedEntity[];
-  recommended_actions?: RecommendedAction[];
-  data_table?: DataTableStructure;
-  suggested_prompts?: string[];
   widgets?: any[];
   artifact?: ArtifactData;
   approval_request?: ApprovalRequestData;
   workflow_id?: string;
+  suggested_prompts?: string[];
 }
 
 interface Message {
@@ -60,99 +29,11 @@ interface Message {
   timestamp: string;
 }
 
-function MobileInteractiveTable({ table }: { table: DataTableStructure }) {
-  const [searchTerm, setSearchTerm] = useState('');
-
-  if (!table || !table.columns || !table.rows || table.rows.length === 0) return null;
-
-  const filteredRows = table.rows.filter(row => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase();
-    return Object.values(row).some(v => String(v).toLowerCase().includes(term));
-  });
-
-  const renderCellBadge = (val: any) => {
-    const s = String(val).toUpperCase();
-    if (['ACTIVE', 'PRESENT', 'ON_TIME', 'APPROVED', 'COMPLETED', 'OPTIMAL', 'OPEN'].includes(s)) {
-      return (
-        <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-          {val}
-        </span>
-      );
-    }
-    if (['PENDING', 'IN_PROGRESS', 'REVIEW'].includes(s)) {
-      return (
-        <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-          {val}
-        </span>
-      );
-    }
-    if (['ABSENT', 'REJECTED', 'HIRING REQUIRED'].includes(s)) {
-      return (
-        <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30">
-          {val}
-        </span>
-      );
-    }
-    return String(val);
-  };
-
-  return (
-    <div className="mt-2 bg-slate-900 border border-slate-700/80 rounded-xl overflow-hidden shadow-xs">
-      <div className="p-2 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1">
-          <TableIcon className="w-3 h-3 text-emerald-400" />
-          <span className="text-[10px] font-bold text-slate-200 truncate">{table.title || 'Data Records'}</span>
-          <span className="text-[9px] px-1 rounded bg-slate-900 text-slate-400 font-mono">
-            {filteredRows.length}
-          </span>
-        </div>
-
-        <div className="relative">
-          <Search className="w-2.5 h-2.5 absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Filter..."
-            className="h-5 pl-4 pr-1.5 text-[10px] bg-slate-900 border border-slate-700 rounded text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 w-20"
-          />
-        </div>
-      </div>
-
-      <div className="overflow-x-auto max-h-48 scrollbar-thin">
-        <table className="w-full text-left border-collapse text-[10px]">
-          <thead>
-            <tr className="bg-slate-800/50 border-b border-slate-700 sticky top-0 backdrop-blur">
-              {table.columns.map((col, cIdx) => (
-                <th key={cIdx} className="px-2 py-1 font-semibold text-slate-400 uppercase whitespace-nowrap">
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800">
-            {filteredRows.map((row, rIdx) => (
-              <tr key={rIdx} className="hover:bg-slate-800/40 even:bg-slate-900/40">
-                {table.columns.map((col, cIdx) => (
-                  <td key={cIdx} className="px-2 py-1 text-slate-200 whitespace-nowrap">
-                    {renderCellBadge(row[col] ?? '--')}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 const DEFAULT_PROMPTS = [
   "Check headcount distribution across all departments",
-  "Show attendance of Priya",
-  "Recruit a new senior backend engineer for HealthPulse",
-  "List all employees in our company"
+  "Show attendance summary for today",
+  "Recruit a senior engineer for engineering team",
+  "List active employees in our company"
 ];
 
 export function CEOMobileChatPage() {
@@ -163,6 +44,8 @@ export function CEOMobileChatPage() {
   const [dynamicPrompts, setDynamicPrompts] = useState<string[]>(DEFAULT_PROMPTS);
   const [isFrameMode, setIsFrameMode] = useState(true);
   const [timeContext, setTimeContext] = useState<any>(null);
+  const [feedbackInput, setFeedbackInput] = useState<{ [workflowId: string]: string }>({});
+  const [revisingId, setRevisingId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -202,9 +85,7 @@ export function CEOMobileChatPage() {
           setMessages(prev => {
             if (prev.length === 0) return formatted;
             const map = new Map<string, Message>();
-            // 1. Existing local messages (preserve newly emitted responses)
             prev.forEach(m => map.set(m.id, m));
-            // 2. Server messages
             formatted.forEach(m => map.set(m.id, m));
             return Array.from(map.values());
           });
@@ -215,9 +96,9 @@ export function CEOMobileChatPage() {
           }
         } else if (messages.length === 0) {
           setMessages([{
-            id: '1',
+            id: 'welcome-1',
             sender: 'ai',
-            text: "Good day, CEO. Executive Workforce AI is synchronized with Supabase & MongoDB Atlas. What command would you like to issue?",
+            text: "Hello! I am your AI Executive Workforce Assistant connected directly to your live database. Ask me anything about headcount, attendance, payroll, hiring, or issue workflow commands.",
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             suggested_prompts: dynamicPrompts
           }]);
@@ -300,6 +181,7 @@ export function CEOMobileChatPage() {
         body: JSON.stringify({ feedback })
       });
       if (res.ok) {
+        setRevisingId(null);
         await fetchUnifiedMessages();
       }
     } catch (e) {
@@ -319,7 +201,6 @@ export function CEOMobileChatPage() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    // Immediately display user message in chat
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
@@ -360,7 +241,7 @@ export function CEOMobileChatPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 md:p-4 font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 md:p-4 font-sans selection:bg-emerald-500 selection:text-black">
       <div className={`w-full ${isFrameMode ? 'max-w-md h-[92vh] border border-slate-800 rounded-3xl shadow-2xl overflow-hidden' : 'h-screen'} bg-slate-900 flex flex-col relative`}>
         
         {/* Header */}
@@ -371,11 +252,11 @@ export function CEOMobileChatPage() {
             </div>
             <div>
               <div className="flex items-center space-x-1.5">
-                <span className="font-semibold text-sm tracking-tight text-white">CEO Autonomous AI</span>
+                <span className="font-semibold text-sm tracking-tight text-white">HRMS AI Assistant</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               </div>
               <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                {timeContext?.period ? <span className="capitalize text-emerald-400 font-medium">{timeContext.period} Sync</span> : 'Live Sync'} • Supabase & Atlas
+                {timeContext?.period ? <span className="capitalize text-emerald-400 font-medium">{timeContext.period} Sync</span> : 'Live Sync'} • Database Active
               </p>
             </div>
           </div>
@@ -399,10 +280,13 @@ export function CEOMobileChatPage() {
         </div>
 
         {/* Message Stream */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.map((msg, idx) => {
             const isUser = msg.sender === 'user';
             const sData = msg.structured_data;
+            const approvalReq = sData?.approval_request || (msg as any).approval_request;
+            const workflowId = sData?.workflow_id || (msg as any).workflow_id || approvalReq?.workflow_id;
+            const isPendingApproval = approvalReq?.status === 'PENDING';
 
             return (
               <motion.div
@@ -412,19 +296,73 @@ export function CEOMobileChatPage() {
                 className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
               >
                 <div
-                  className={`max-w-[92%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed space-y-2 ${
+                  className={`max-w-[94%] rounded-2xl px-4 py-3 text-xs leading-relaxed space-y-2 ${
                     isUser
-                      ? 'bg-emerald-600 text-white rounded-br-none shadow-sm'
-                      : 'bg-slate-800/90 border border-slate-700/60 text-slate-200 rounded-bl-none shadow-sm'
+                      ? 'bg-emerald-600 text-white rounded-br-xs shadow-md'
+                      : 'bg-slate-800/90 border border-slate-700/60 text-slate-200 rounded-bl-xs shadow-md'
                   }`}
                 >
-
-
-                  {/* Content (Claude & ChatGPT Style Markdown Renderer) */}
+                  {/* Clean humanoid markdown answer */}
                   {isUser ? (
-                    <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>
+                    <div className="whitespace-pre-wrap leading-relaxed text-[13px]">{msg.text}</div>
                   ) : (
-                    <ChatGPTMarkdownRenderer content={msg.text} />
+                    <div className="text-[13px] leading-relaxed">
+                      <ChatGPTMarkdownRenderer content={msg.text} />
+                    </div>
+                  )}
+
+                  {/* Clean inline HITL Approval bar when action is required */}
+                  {!isUser && isPendingApproval && workflowId && (
+                    <div className="mt-3 pt-3 border-t border-slate-700/60 flex flex-col gap-2">
+                      <div className="flex items-center justify-between text-[11px] text-amber-400 font-medium">
+                        <span className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 animate-pulse" />
+                          Approval Required: {approvalReq?.action_type || 'Workflow Action'}
+                        </span>
+                      </div>
+                      
+                      {revisingId === workflowId ? (
+                        <div className="flex flex-col gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700">
+                          <input
+                            type="text"
+                            placeholder="Type revision notes..."
+                            value={feedbackInput[workflowId] || ''}
+                            onChange={(e) => setFeedbackInput({ ...feedbackInput, [workflowId]: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                          />
+                          <div className="flex gap-1.5 justify-end">
+                            <button
+                              onClick={() => setRevisingId(null)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px]"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => handleRevise(workflowId, feedbackInput[workflowId] || '')}
+                              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium text-[11px]"
+                            >
+                              Submit Revision
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleApprove(workflowId)}
+                            className="flex-1 py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px] flex items-center justify-center gap-1.5 transition shadow-xs"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Approve Action
+                          </button>
+                          <button
+                            onClick={() => setRevisingId(workflowId)}
+                            className="py-1.5 px-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-[11px] flex items-center justify-center gap-1.5 transition"
+                          >
+                            Request Revision
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* Interactive Structured Widgets */}
@@ -449,36 +387,9 @@ export function CEOMobileChatPage() {
                     </div>
                   )}
 
-                  {/* Detected Entities */}
-                  {!isUser && sData?.entities_detected && sData.entities_detected.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {sData.entities_detected.map((e, eIdx) => (
-                        <span key={eIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[9px] text-slate-300">
-                          {e.type === 'EMPLOYEE' ? <User className="w-2.5 h-2.5 text-emerald-400" /> : <Building2 className="w-2.5 h-2.5 text-emerald-400" />}
-                          <span>{e.name}</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Recommended Actions */}
-                  {!isUser && sData?.recommended_actions && sData.recommended_actions.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-700/50">
-                      {sData.recommended_actions.map((act) => (
-                        <button
-                          key={act.id}
-                          onClick={() => act.action_type === 'QUERY' ? handleSend(act.target) : window.open(act.target, '_self')}
-                          className="px-2 py-1 rounded bg-slate-900 hover:bg-emerald-600 hover:text-white border border-slate-700 text-[10px] text-emerald-300 transition flex items-center gap-1"
-                        >
-                          <Zap className="w-2.5 h-2.5" />
-                          <span>{act.label}</span>
-                          <ArrowUpRight className="w-2.5 h-2.5" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-
+                  <div className={`text-[9px] pt-1 text-right ${isUser ? 'text-emerald-200/80' : 'text-slate-400'}`}>
+                    {msg.timestamp}
+                  </div>
                 </div>
               </motion.div>
             );
@@ -487,17 +398,17 @@ export function CEOMobileChatPage() {
           {isLoading && (
             <div className="flex items-center space-x-2 text-xs text-slate-400 bg-slate-800/50 border border-slate-700/40 rounded-xl px-3 py-2 w-fit">
               <Sparkles className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-              <span>Multi-agent reasoning & domain synthesis...</span>
+              <span>Synthesizing response...</span>
             </div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Dynamic Contextual Suggested Prompts Bar */}
+        {/* Suggested Prompts */}
         <div className="px-3 py-2 bg-slate-900/95 border-t border-slate-800 overflow-x-auto scrollbar-none flex items-center gap-1.5 shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap flex items-center gap-1">
-            <Sparkles className="w-2.5 h-2.5 text-emerald-400" /> Suggestions:
+            <Sparkles className="w-2.5 h-2.5 text-emerald-400" /> Quick Prompts:
           </span>
           {dynamicPrompts.map((prompt, i) => (
             <button
@@ -527,7 +438,7 @@ export function CEOMobileChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={isListening ? 'Listening...' : 'Command AI fleet...'}
+            placeholder={isListening ? 'Listening...' : 'Type your message...'}
             className="flex-1 bg-slate-800 border border-slate-700 rounded-full px-4 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
           />
 
