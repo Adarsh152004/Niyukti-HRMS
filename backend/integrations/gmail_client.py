@@ -26,6 +26,7 @@ class GmailClient:
         client_secret: Optional[str] = None,
         refresh_token: Optional[str] = None,
         sender_email: Optional[str] = None,
+    ):
         self._client_id = client_id
         self._client_secret = client_secret
         self._refresh_token = refresh_token
