@@ -1442,7 +1442,7 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
     # ----------------------------------------------------
     elif is_email_send_request:
         emails_found = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", req.query)
-        target_email = emails_found[0] if emails_found else "adarshyt1504@gmail.com"
+        target_email = emails_found[0] if emails_found else os.getenv("GMAIL_TEST_RECIPIENT", "adarshyt1504@gmail.com")
         
         subject = "HR & Workforce Update from Azyntrix"
         m_sub = re.search(r"subject[:\s]+([^,\.\n]+)", req.query, re.IGNORECASE)

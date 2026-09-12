@@ -26,12 +26,27 @@ class GmailClient:
         client_secret: Optional[str] = None,
         refresh_token: Optional[str] = None,
         sender_email: Optional[str] = None,
-    ):
-        self.client_id = client_id or os.getenv("GMAIL_CLIENT_ID", "")
-        self.client_secret = client_secret or os.getenv("GMAIL_CLIENT_SECRET", "")
-        self.refresh_token = refresh_token or os.getenv("GMAIL_REFRESH_TOKEN", "")
-        self.sender_email = sender_email or os.getenv("GMAIL_SENDER_EMAIL", "me")
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._refresh_token = refresh_token
+        self._sender_email = sender_email
         self._access_token: Optional[str] = None
+
+    @property
+    def client_id(self) -> str:
+        return self._client_id or os.getenv("GMAIL_CLIENT_ID", "")
+
+    @property
+    def client_secret(self) -> str:
+        return self._client_secret or os.getenv("GMAIL_CLIENT_SECRET", "")
+
+    @property
+    def refresh_token(self) -> str:
+        return self._refresh_token or os.getenv("GMAIL_REFRESH_TOKEN", "")
+
+    @property
+    def sender_email(self) -> str:
+        return self._sender_email or os.getenv("GMAIL_SENDER_EMAIL", "2000nyrasharma@gmail.com")
 
     def is_configured(self) -> bool:
         return bool(self.client_id and self.client_secret and self.refresh_token)
