@@ -98,15 +98,19 @@ class RealGmailOAuthProvider(GmailProvider):
         if self.access_token and now < self.token_expiry:
             return self.access_token
 
-        if self.refresh_token and self.client_id and self.client_secret:
+        client_id = self.client_id or os.getenv("GMAIL_CLIENT_ID", "")
+        client_secret = self.client_secret or os.getenv("GMAIL_CLIENT_SECRET", "")
+        refresh_token = self.refresh_token or os.getenv("GMAIL_REFRESH_TOKEN", "")
+
+        if refresh_token and client_id and client_secret:
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.post(
                         "https://oauth2.googleapis.com/token",
                         data={
-                            "client_id": self.client_id,
-                            "client_secret": self.client_secret,
-                            "refresh_token": self.refresh_token,
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "refresh_token": refresh_token,
                             "grant_type": "refresh_token",
                         },
                     )
