@@ -14,33 +14,65 @@ import { withDataProvider } from '@/providers/data-provider';
 import { DEMO_EMPLOYEES } from '@/fixtures';
 import { apiClient } from '@/api/client';
 
+export interface EmployeeRecord {
+  id: string;
+  full_name: string;
+  email: string;
+  department: string;
+  designation: string;
+  location: string;
+  status: string;
+  employee_code?: string;
+}
+
+function normalizeEmployee(e: any): EmployeeRecord {
+  const firstName = e.first_name || '';
+  const lastName = e.last_name || '';
+  const fullName = e.full_name || (firstName || lastName ? `${firstName} ${lastName}`.trim() : '') || e.preferred_name || 'Staff Member';
+  const rawStatus = e.status || e.employment_status || 'active';
+  
+  return {
+    id: String(e.id || e.employee_id || e.employee_code || `emp-${Math.random()}`),
+    full_name: fullName,
+    email: e.email || '',
+    department: e.department || e.department_id || 'General',
+    designation: e.designation || e.designation_id || 'Employee',
+    location: e.location || 'HQ',
+    status: typeof rawStatus === 'string' ? rawStatus.toLowerCase() : 'active',
+    employee_code: e.employee_code || e.employee_id || '',
+  };
+}
+
 export function EmployeesPage() {
   const navigate = useNavigate();
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
 
-  const { data: employees, isLoading } = useQuery({
+  const { data: employees = [], isLoading } = useQuery<EmployeeRecord[]>({
     queryKey: ['employees', page, search, statusFilter],
     queryFn: () =>
       withDataProvider(
         async () => {
           const res = await apiClient<{ data: any[] }>('/employees');
-          return res.data || [];
+          const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+          return list.map(normalizeEmployee);
         },
-        DEMO_EMPLOYEES
+        DEMO_EMPLOYEES.map(normalizeEmployee)
       ),
   });
 
   const filtered = React.useMemo(() => {
-    if (!employees) return [];
+    if (!employees || !Array.isArray(employees)) return [];
     return employees.filter((e) => {
-      const matchSearch =
-        !search ||
-        e.full_name.toLowerCase().includes(search.toLowerCase()) ||
-        e.email.toLowerCase().includes(search.toLowerCase()) ||
-        e.department.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === 'all' || e.status === statusFilter;
+      const name = (e.full_name || '').toLowerCase();
+      const email = (e.email || '').toLowerCase();
+      const dept = (e.department || '').toLowerCase();
+      const desig = (e.designation || '').toLowerCase();
+      const sQuery = search.toLowerCase();
+
+      const matchSearch = !search || name.includes(sQuery) || email.includes(sQuery) || dept.includes(sQuery) || desig.includes(sQuery);
+      const matchStatus = statusFilter === 'all' || e.status === statusFilter.toLowerCase();
       return matchSearch && matchStatus;
     });
   }, [employees, search, statusFilter]);
@@ -80,6 +112,7 @@ export function EmployeesPage() {
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
+          <option value="on_leave">On Leave</option>
         </select>
         <Button variant="secondary" size="sm">
           <Filter className="h-3.5 w-3.5" aria-hidden />
@@ -157,7 +190,7 @@ export function EmployeesPage() {
             </Table>
             <Pagination
               page={page}
-              totalPages={Math.ceil(filtered.length / 20)}
+              totalPages={Math.max(1, Math.ceil(filtered.length / 20))}
               total={filtered.length}
               pageSize={20}
               onPageChange={setPage}

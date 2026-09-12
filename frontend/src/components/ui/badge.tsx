@@ -64,19 +64,26 @@ function RiskBadge({ level, className }: { level: RiskLevel; className?: string 
 }
 
 // ── Status badge — employee/workflow/agent statuses ────────────────────────
-type StatusVariant = 'active' | 'inactive' | 'pending' | 'running' | 'failed' | 'suspended';
+type StatusVariant = 'active' | 'inactive' | 'pending' | 'running' | 'failed' | 'suspended' | 'on_leave' | 'resigned' | 'terminated' | string;
 
-const statusConfig: Record<StatusVariant, { label: string; variant: BadgeProps['variant'] }> = {
+const statusConfig: Record<string, { label: string; variant: BadgeProps['variant'] }> = {
   active: { label: 'Active', variant: 'success' },
   inactive: { label: 'Inactive', variant: 'default' },
   pending: { label: 'Pending', variant: 'warning' },
   running: { label: 'Running', variant: 'primary' },
   failed: { label: 'Failed', variant: 'danger' },
   suspended: { label: 'Suspended', variant: 'danger' },
+  on_leave: { label: 'On Leave', variant: 'warning' },
+  resigned: { label: 'Resigned', variant: 'default' },
+  terminated: { label: 'Terminated', variant: 'danger' },
 };
 
 function StatusBadge({ status, className }: { status: StatusVariant; className?: string }) {
-  const config = statusConfig[status];
+  const normalizedKey = (status || 'active').toLowerCase();
+  const config = statusConfig[normalizedKey] || {
+    label: (status || 'Unknown').charAt(0).toUpperCase() + (status || 'Unknown').slice(1).toLowerCase(),
+    variant: 'default'
+  };
   return (
     <Badge variant={config.variant} className={className}>
       <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" aria-hidden />

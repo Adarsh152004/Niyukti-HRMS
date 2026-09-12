@@ -50,6 +50,7 @@ export function AIAssistantPage() {
   const navigate = useNavigate();
   const [input, setInput] = React.useState('');
   const [isSending, setIsSending] = React.useState(false);
+  const [pendingUserQuery, setPendingUserQuery] = React.useState<string | null>(null);
   const [feedbackInput, setFeedbackInput] = React.useState<{ [workflowId: string]: string }>({});
   const [revisingId, setRevisingId] = React.useState<string | null>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
@@ -74,7 +75,7 @@ export function AIAssistantPage() {
       if (!res.ok) return [];
       const data = await res.json();
       return (data || []).map((m: any, idx: number) => ({
-        id: m.id || String(idx),
+        id: m.id || `msg-${idx}`,
         role: m.role,
         content: m.content,
         structured_data: m.structured_data,
@@ -88,7 +89,7 @@ export function AIAssistantPage() {
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isSending]);
+  }, [messages, isSending, pendingUserQuery]);
 
   const handleApprove = async (workflowId: string) => {
     try {
@@ -135,16 +136,8 @@ export function AIAssistantPage() {
     const query = (textToSend || input).trim();
     if (!query || isSending) return;
 
-    const userMsgId = `temp-${Date.now()}`;
-    const userMsg: ChatMessageItem = {
-      id: userMsgId,
-      role: 'user',
-      content: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    queryClient.setQueryData<ChatMessageItem[]>(['unified-chat-messages'], (old = []) => [...old, userMsg]);
     setInput('');
+    setPendingUserQuery(query);
     setIsSending(true);
 
     try {
@@ -159,23 +152,14 @@ export function AIAssistantPage() {
       });
 
       if (res.ok) {
-        const data = await res.json();
-        const assistantText = data.envelope?.text || data.markdown_answer || data.text || "Processed your request.";
-        const assistantMsg: ChatMessageItem = {
-          id: data.envelope?.message_id || `resp-${Date.now()}`,
-          role: 'assistant',
-          content: assistantText,
-          structured_data: data.structured_response || data.envelope,
-          suggested_prompts: data.suggested_prompts || [],
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
-
-        queryClient.setQueryData<ChatMessageItem[]>(['unified-chat-messages'], (old = []) => [...old, assistantMsg]);
+        await queryClient.refetchQueries({ queryKey: ['unified-chat-messages'] });
       }
     } catch (err) {
       console.error('Failed to send message:', err);
     } finally {
+      setPendingUserQuery(null);
       setIsSending(false);
+      queryClient.refetchQueries({ queryKey: ['unified-chat-messages'] });
     }
   };
 
@@ -369,6 +353,22 @@ export function AIAssistantPage() {
               </div>
             );
           })
+        )}
+
+        {pendingUserQuery && (
+          <div className="flex gap-3 max-w-[90%] md:max-w-[85%] ml-auto flex-row-reverse">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold bg-accent text-white shadow-xs">
+              U
+            </div>
+            <div className="rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-xs bg-accent text-white rounded-tr-none">
+              <div className="whitespace-pre-wrap leading-relaxed text-xs sm:text-sm">
+                {pendingUserQuery}
+              </div>
+              <div className="text-[10px] text-right text-white/70 mt-1">
+                Sending...
+              </div>
+            </div>
+          </div>
         )}
 
         {isSending && (

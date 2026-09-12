@@ -50,6 +50,7 @@ export function CEOMobileChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingUserQuery, setPendingUserQuery] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [dynamicPrompts, setDynamicPrompts] = useState<string[]>(DEFAULT_PROMPTS);
   const [isFrameMode, setIsFrameMode] = useState(true);
@@ -78,9 +79,9 @@ export function CEOMobileChatPage() {
       const res = await fetch('/api/v1/chat/messages');
       if (res.ok) {
         const data = await res.json();
-        if (data && data.length > 0) {
+        if (data && Array.isArray(data) && data.length > 0) {
           const formatted: Message[] = data.map((m: any, idx: number) => ({
-            id: m.id || String(idx),
+            id: m.id || `msg-${idx}`,
             sender: m.role === 'user' ? 'user' : 'ai',
             text: m.content,
             structured_data: m.structured_data,
@@ -88,19 +89,13 @@ export function CEOMobileChatPage() {
             timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }));
 
-          setMessages(prev => {
-            if (prev.length === 0) return formatted;
-            const map = new Map<string, Message>();
-            prev.forEach(m => map.set(m.id, m));
-            formatted.forEach(m => map.set(m.id, m));
-            return Array.from(map.values());
-          });
+          setMessages(formatted);
 
           const latestAi = [...formatted].reverse().find(m => m.sender === 'ai');
           if (latestAi?.suggested_prompts?.length) {
             setDynamicPrompts(latestAi.suggested_prompts);
           }
-        } else if (messages.length === 0) {
+        } else {
           setMessages([{
             id: 'welcome-1',
             sender: 'ai',
@@ -124,7 +119,7 @@ export function CEOMobileChatPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, pendingUserQuery]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -210,16 +205,8 @@ export function CEOMobileChatPage() {
     const query = (textToSend || input).trim();
     if (!query || isLoading) return;
 
-    const userMsgId = Date.now().toString();
-    const userMessage: Message = {
-      id: userMsgId,
-      sender: 'user',
-      text: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setMessages(prev => [...prev, userMessage]);
     setInput('');
+    setPendingUserQuery(query);
     setIsLoading(true);
 
     try {
@@ -233,27 +220,15 @@ export function CEOMobileChatPage() {
         })
       });
 
-      const data = await response.json();
-      
-      const assistantText = data.envelope?.text || data.markdown_answer || data.text || "Processed your request.";
-      const assistantMsg: Message = {
-        id: data.envelope?.message_id || Date.now().toString(),
-        sender: 'ai',
-        text: assistantText,
-        structured_data: data.structured_response || data.envelope,
-        suggested_prompts: data.suggested_prompts || [],
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages(prev => [...prev, assistantMsg]);
-
-      if (data.suggested_prompts?.length) {
-        setDynamicPrompts(data.suggested_prompts);
+      if (response.ok) {
+        await fetchUnifiedMessages();
       }
-
     } catch (err) {
       console.error(err);
     } finally {
+      setPendingUserQuery(null);
       setIsLoading(false);
+      await fetchUnifiedMessages();
     }
   };
 
@@ -396,6 +371,19 @@ export function CEOMobileChatPage() {
               </motion.div>
             );
           })}
+
+          {pendingUserQuery && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-col items-end"
+            >
+              <div className="max-w-[92%] rounded-2xl px-4 py-3 text-xs leading-relaxed space-y-1 bg-emerald-600 text-white rounded-br-xs shadow-xs">
+                <div className="whitespace-pre-wrap leading-relaxed text-[13px]">{pendingUserQuery}</div>
+                <div className="text-[10px] pt-0.5 text-right text-emerald-100">Sending...</div>
+              </div>
+            </motion.div>
+          )}
 
           {isLoading && (
             <div className="flex items-center space-x-2 text-xs text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2 w-fit shadow-xs">
