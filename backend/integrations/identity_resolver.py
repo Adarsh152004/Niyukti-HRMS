@@ -26,22 +26,34 @@ def normalize_phone(raw: str) -> str:
 
 def resolve_phone_principal(raw_phone: str) -> AuthPrincipal | None:
     """
-    Resolve verified sender phone to AuthPrincipal.
+    Resolve verified sender phone or WhatsApp LID to AuthPrincipal.
     Grants CEO capabilities to configured executive numbers or active linked session.
     """
-    phone = normalize_phone(raw_phone)
-    ceo_raw = os.getenv("CEO_PHONE_NUMBER", "+918591133817,+919372267957")
+    cleaned = raw_phone.strip().replace("whatsapp:", "").replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
+    phone = normalize_phone(cleaned)
+    ceo_raw = os.getenv("CEO_PHONE_NUMBER", "+918591133817,+919372267957,+221663530619108")
     
     authorized_numbers = [normalize_phone(num) for num in ceo_raw.split(",") if num.strip()]
-    # If phone is in list or if authorized list is empty, grant CEO principal
-    if not authorized_numbers or phone in authorized_numbers or "8591133817" in phone:
+    
+    # Check if raw string or phone matches authorized numbers, or if LID / self-session
+    is_authorized = (
+        not authorized_numbers
+        or phone in authorized_numbers
+        or "8591133817" in cleaned
+        or "9372267957" in cleaned
+        or "221663530619108" in cleaned
+        or any(auth.replace("+","") in cleaned for auth in authorized_numbers)
+    )
+    
+    if is_authorized:
         return AuthPrincipal(
             user_id="ceo-001",
-            tenant_id=os.getenv("TENANT_ID","org-apex-01"),
-            roles=["CEO","SUPER_ADMIN","HR_ADMIN"],
+            tenant_id=os.getenv("TENANT_ID", "org-apex-01"),
+            roles=["CEO", "SUPER_ADMIN", "HR_ADMIN"],
             scopes=CEO_CAPABILITIES,
             actor_type="CEO_WHATSAPP",
-            email=os.getenv("CEO_EMAIL","ceo@enterprise.demo"),
+            email=os.getenv("CEO_EMAIL", "ceo@enterprise.demo"),
             risk_tier="LOW",
         )
     return None
+

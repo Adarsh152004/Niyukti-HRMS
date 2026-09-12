@@ -232,18 +232,18 @@ class OpenWAProvider(WhatsAppProvider):
             data = payload.get("data", payload)
             
             # Extract sender
-            raw_from = data.get("from") or data.get("sender") or data.get("From", "")
+            raw_from = str(data.get("from") or data.get("sender") or data.get("From") or data.get("chatId") or "").strip()
             if not raw_from and isinstance(data.get("chat"), dict):
-                raw_from = data["chat"].get("id", "")
+                raw_from = str(data["chat"].get("id", "")).strip()
             
             clean_from = raw_from.replace("@c.us", "").replace("@s.whatsapp.net", "").replace("whatsapp:", "")
-            if clean_from and not clean_from.startswith("+"):
+            if clean_from and not clean_from.startswith("+") and not "@" in clean_from:
                 clean_from = "+" + clean_from
 
             # Extract recipient
-            raw_to = data.get("to") or data.get("To", "")
+            raw_to = str(data.get("to") or data.get("To") or "").strip()
             clean_to = raw_to.replace("@c.us", "").replace("@s.whatsapp.net", "").replace("whatsapp:", "")
-            if clean_to and not clean_to.startswith("+"):
+            if clean_to and not clean_to.startswith("+") and not "@" in clean_to:
                 clean_to = "+" + clean_to
 
             # Extract body
@@ -260,8 +260,8 @@ class OpenWAProvider(WhatsAppProvider):
 
             return WAInboundMessage(
                 message_id=str(uuid.uuid4()),
-                from_number=clean_from,
-                to_number=clean_to,
+                from_number=raw_from if "@" in raw_from else clean_from,
+                to_number=raw_to if "@" in raw_to else clean_to,
                 body=str(body).strip(),
                 message_type=msg_type,
                 timestamp=ts,
@@ -280,8 +280,12 @@ class OpenWAProvider(WhatsAppProvider):
         if not self._ok():
             return WASendResult(False, error="OpenWA base URL not configured", status="NOT_CONFIGURED")
 
-        clean_number = msg.to_number.lstrip("+").replace("@c.us", "")
-        chat_id = f"{clean_number}@c.us"
+        target = msg.to_number.strip()
+        if "@" in target:
+            chat_id = target.replace("@c.us", "@s.whatsapp.net") if not target.endswith("@lid") else target
+        else:
+            clean_number = target.lstrip("+").replace("@c.us", "")
+            chat_id = f"{clean_number}@s.whatsapp.net"
 
         # Endpoints to attempt (supporting standard OpenWA REST schemas)
         endpoints = [

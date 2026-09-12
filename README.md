@@ -119,7 +119,6 @@ flowchart TD
 | **HRMS Web Workspace** | `frontend/` | `http://localhost:5185` (or `5173`) | React 19, TypeScript, TailwindCSS, Lucide |
 | **Azyntrix Backend API** | `azyntrix/backend/` | `http://localhost:5050` | Node.js, Express.js, Mongoose, MongoDB Atlas |
 | **Azyntrix Career & Admin**| `azyntrix/` | `http://localhost:5180` | React 19, TypeScript, TailwindCSS, Lucide |
-| **OpenWA WhatsApp Gateway** | `openwa_gateway/` | `http://localhost:2785` | NestJS, Baileys / Puppeteer, SQLite |
 
 > **🔐 Default Admin Passcode for Azyntrix Dashboard (`http://localhost:5180/admin`)**:  
 > `azyntrix-admin-2026`
@@ -149,12 +148,12 @@ AZYNTRIX_API_URL=http://localhost:5050
 AZYNTRIX_API_KEY=azyntrix-agent-dev-key-2026
 MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/azyntrix?retryWrites=true&w=majority
 
-# --- OpenWA WhatsApp Gateway ---
-OPENWA_API_URL=http://localhost:2785
-OPENWA_API_KEY=
-OPENWA_SESSION_ID=default
-OPENWA_WEBHOOK_SECRET=your_webhook_secret_here
-CEO_PHONE_NUMBER=919876543210
+# --- WhatsApp Business Integration (Meta Cloud API / Twilio) ---
+WHATSAPP_PROVIDER=meta
+WHATSAPP_PHONE_NUMBER_ID=your_meta_phone_number_id
+WHATSAPP_ACCESS_TOKEN=your_meta_system_user_token
+WHATSAPP_VERIFY_TOKEN=hrms-webhook-verify
+CEO_PHONE_NUMBER=+918591133817
 ```
 
 ---
@@ -207,22 +206,13 @@ npm run dev -- --port 5180
 
 ---
 
-### Step 5: OpenWA WhatsApp Gateway Setup & Device Pairing
-```bash
-# 1. Navigate to OpenWA directory
-cd openwa_gateway
+### Step 5: Meta WhatsApp Business API Setup (Optional / Free Tier)
+The HRMS includes built-in support for official WhatsApp Business messaging via the **Meta Cloud API** (free 1,000 monthly service conversations) or **Twilio WhatsApp Sandbox**.
 
-# 2. Install dependencies
-npm install
-
-# 3. Start OpenWA Server
-npm run start:dev
-```
-* **QR Code Pairing**:
-  1. Look at your terminal output or open the OpenWA Dashboard at **`http://localhost:2785`**.
-  2. Open WhatsApp on your phone > **Settings** > **Linked Devices** > **Link a Device**.
-  3. Scan the terminal ASCII QR code or the dashboard QR code.
-  4. Once authenticated, the CEO WhatsApp loop will automatically handle incoming messages and push real-time HR briefings.
+1. Create a free developer app at [developers.facebook.com](https://developers.facebook.com) with the **WhatsApp product**.
+2. Copy your **Phone Number ID** and **System User Access Token** into `.env`.
+3. Set your Webhook URL to: `https://<your-domain-or-ngrok>/api/v1/integrations/whatsapp/webhook`.
+4. Inbound messages from your executive number automatically trigger real-time HR briefings and recruitment approvals.
 
 ---
 
