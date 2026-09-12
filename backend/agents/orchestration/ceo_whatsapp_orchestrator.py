@@ -33,6 +33,12 @@ from backend.agents.tools.azyntrix_tools import (
     advance_application_status,
 )
 from backend.agents.tools.db_tools import get_total_employee_count, get_headcount_by_department
+from backend.agents.tools.gmail_tools import (
+    get_email_thread,
+    get_unread_priority_emails,
+    search_emails,
+    send_email,
+)
 from backend.agents.orchestration.azyntrix_node import is_azyntrix_query, run_azyntrix_agent
 from backend.api.realtime.websocket_manager import ws_hub
 
@@ -48,6 +54,8 @@ class CEOIntent(StrEnum):
     CANDIDATE_QUERY       = "CANDIDATE_QUERY"
     OFFER_COMMAND         = "OFFER_COMMAND"
     WORKFORCE_QUERY       = "WORKFORCE_QUERY"
+    EMAIL_QUERY           = "EMAIL_QUERY"
+    SEND_EMAIL_COMMAND    = "SEND_EMAIL_COMMAND"
     MORNING_BRIEFING      = "MORNING_BRIEFING"
     GENERAL_HR_QUERY      = "GENERAL_HR_QUERY"
 
@@ -107,6 +115,14 @@ def _extract_intent_keywords(msg: str) -> CEOIntent:
     if any(k in m for k in ["prepare offer", "send offer", "make an offer", "offer to", "advance to offer"]):
         return CEOIntent.OFFER_COMMAND
 
+    # Send Email command
+    if re.search(r"\bsend\s+email\b|\bcompose\s+email\b|\bemail\s+to\b", m):
+        return CEOIntent.SEND_EMAIL_COMMAND
+
+    # Email & Inbox Queries
+    if any(k in m for k in ["email", "emails", "gmail", "inbox", "unread mail", "priority mail", "mail from", "read msg-"]):
+        return CEOIntent.EMAIL_QUERY
+
     # Azyntrix / Recruitment general
     if is_azyntrix_query(m) or any(k in m for k in ["candidate", "applicant", "pipeline", "job opening", "open role"]):
         return CEOIntent.AZYNTRIX_RECRUITMENT
@@ -143,6 +159,8 @@ async def handle_ceo_message(phone: str, message_body: str, principal: Any) -> s
                     response = await _handle_publish_job_approval(session, pending)
                 elif action_type == "advance_offer":
                     response = await _handle_offer_approval(session, pending)
+                elif action_type == "send_email":
+                    response = await _handle_send_email_approval(session, pending)
                 else:
                     response = f"✅ *Approved.* Completed action `{action_type}`."
                 session.pending_confirmation = None
@@ -171,15 +189,23 @@ async def handle_ceo_message(phone: str, message_body: str, principal: Any) -> s
     elif intent == CEOIntent.OFFER_COMMAND:
         response = await _handle_offer_command(session, message_body)
 
-    # ── 6. Morning Briefing ────────────────────────────────────────────────────
+    # ── 6. Email Query (Gmail MCP) ─────────────────────────────────────────────
+    elif intent == CEOIntent.EMAIL_QUERY:
+        response = await _handle_email_query(message_body)
+
+    # ── 7. Send Email Command ──────────────────────────────────────────────────
+    elif intent == CEOIntent.SEND_EMAIL_COMMAND:
+        response = await _handle_send_email_command(session, message_body)
+
+    # ── 8. Morning Briefing ────────────────────────────────────────────────────
     elif intent == CEOIntent.MORNING_BRIEFING:
         response = await _handle_morning_briefing()
 
-    # ── 7. Workforce & Headcount ───────────────────────────────────────────────
+    # ── 9. Workforce & Headcount ───────────────────────────────────────────────
     elif intent == CEOIntent.WORKFORCE_QUERY:
         response = await _handle_workforce_query(message_body)
 
-    # ── 8. General AI Fallback ─────────────────────────────────────────────────
+    # ── 10. General AI Fallback ────────────────────────────────────────────────
     else:
         response = await _handle_general_query(message_body)
 
@@ -378,12 +404,95 @@ async def _handle_workforce_query(message: str) -> str:
         return f"Workforce query error: {e}"
 
 
+async def _handle_email_query(message: str) -> str:
+    """Handle CEO query to search or inspect corporate emails."""
+    try:
+        # Check if user asked for a specific message ID (e.g. msg-101)
+        msg_id_match = re.search(r"msg-\d+", message, re.IGNORECASE)
+        if msg_id_match:
+            msg_id = msg_id_match.group(0).lower()
+            return await get_email_thread(message_id=msg_id)
+
+        # Check for unread / priority request
+        if any(k in message.lower() for k in ["priority", "urgent", "unread", "critical", "important"]):
+            priority_emails = await get_unread_priority_emails()
+            if not priority_emails:
+                return "📧 *Priority Inbox:* No pending unread critical/urgent emails found."
+            lines = [f"🚨 *{len(priority_emails)} Priority Email(s) Requiring Attention:*\n"]
+            for e in priority_emails:
+                lines.append(
+                    f"• *[{e['priority']}]* {e['subject']}\n"
+                    f"  From: `{e['sender']}` | ID: `{e['id']}`\n"
+                )
+            lines.append("Reply *read msg-XXX* to inspect full message body.")
+            return "\n".join(lines)
+
+        # General search
+        clean_query = re.sub(r"^(search|check|find|show|list)\s+(email|emails|mail|inbox)\s*(for|about)?", "", message, flags=re.IGNORECASE).strip()
+        search_res = await search_emails(query=clean_query, max_results=5)
+        return f"📨 *Gmail Search Results*\n\n{search_res}"
+    except Exception as e:
+        logger.error(f"[CEO Email Query Error]: {e}")
+        return f"⚠️ Error searching emails: {e}"
+
+
+async def _handle_send_email_command(session: ConversationState, message: str) -> str:
+    """Prepare an email draft and ask CEO for confirmation before sending."""
+    system = (
+        "Extract recipient email address, subject line, and body message from the CEO's command. "
+        "Return a clean JSON object with keys: to, subject, body."
+    )
+    messages = [{"role": "user", "content": message}]
+    extracted_json = ""
+    try:
+        async for token in default_gateway.astream_chat(messages, system_instruction=system):
+            extracted_json += token
+        clean = re.sub(r"```json|```", "", extracted_json).strip()
+        data = json.loads(clean)
+    except Exception:
+        email_match = re.search(r"[\w\.-]+@[\w\.-]+", message)
+        data = {
+            "to": email_match.group(0) if email_match else "recipient@company.com",
+            "subject": "Executive Update from CEO Office",
+            "body": message,
+        }
+
+    session.pending_confirmation = {
+        "action_type": "send_email",
+        "email_data": data,
+    }
+
+    return (
+        f"✉️ *Email Draft Ready for Dispatch*\n\n"
+        f"• *To*: `{data.get('to')}`\n"
+        f"• *Subject*: *{data.get('subject')}*\n"
+        f"• *Body Preview*: {data.get('body')[:160]}...\n\n"
+        f"Reply *Approve* to send this email via Gmail MCP or *Cancel* to discard."
+    )
+
+
+async def _handle_send_email_approval(session: ConversationState, pending: dict) -> str:
+    """Dispatch email after CEO confirmation."""
+    data = pending.get("email_data", {})
+    to = data.get("to", "")
+    subject = data.get("subject", "")
+    body = data.get("body", "")
+    try:
+        res = await send_email(to=to, subject=subject, body=body)
+        return res
+    except Exception as e:
+        return f"⚠️ Failed to send email: {e}"
+
+
 async def _handle_morning_briefing() -> str:
     """Synthesizes live morning briefing."""
     try:
         counts = await get_total_employee_count.ainvoke({})
         dash = await get_azyntrix_dashboard.ainvoke({})
         stats = dash.get("stats", {})
+        priority_emails = await get_unread_priority_emails()
+
+        email_status = f"• Unread Priority Items: *{len(priority_emails)}*" if priority_emails else "• Priority Inbox: Clean (0 unread)"
 
         return (
             f"☀️ *Good Morning, Sir — Executive HR & Talent Briefing*\n\n"
@@ -394,8 +503,10 @@ async def _handle_morning_briefing() -> str:
             f"• Active Openings: *{stats.get('activeJobs', 0)}*\n"
             f"• Total Applications: *{stats.get('totalApplications', 0)}*\n"
             f"• In Screening: *{stats.get('applicationsByStatus', {}).get('screening', 0)}*\n\n"
+            f"📧 *Executive Communications & Gmail Intelligence:*\n"
+            f"{email_status}\n\n"
             f"🔒 *AI Systems*: All autonomous agents operational.\n"
-            f"Reply with any command to view details or post new roles."
+            f"Reply with any command to inspect details, dispatch emails, or post roles."
         )
     except Exception as e:
         logger.error(f"[CEO Briefing Error]: {e}")

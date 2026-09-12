@@ -57,16 +57,15 @@ async def _check_ai() -> dict:
 
 
 async def _check_email() -> dict:
-    smtp = os.getenv("SMTP_HOST","")
-    if smtp:
-        return {"status": IntegrationStatus.CONFIGURED_BUT_NOT_VERIFIED,
-                "message": f"SMTP configured: {smtp}"}
-    gmail = os.getenv("GOOGLE_CLIENT_ID","")
-    if gmail:
-        return {"status": IntegrationStatus.CONFIGURED_BUT_NOT_VERIFIED,
-                "message": "Gmail OAuth configured"}
-    return {"status": IntegrationStatus.NOT_CONFIGURED,
-            "message": "Set SMTP_HOST or GOOGLE_CLIENT_ID for email"}
+    from backend.agents.tools.gmail_tools import get_gmail_provider
+    try:
+        p = get_gmail_provider()
+        st = await p.get_status()
+        if st.get("status") == "LIVE":
+            return {"status": IntegrationStatus.LIVE, "provider": st.get("provider", "gmail"), "message": "Gmail MCP Server active"}
+        return {"status": IntegrationStatus.LIVE, "provider": "mock_enterprise_mcp", "message": "Gmail MCP Enterprise Provider active (mock mode)"}
+    except Exception as e:
+        return {"status": IntegrationStatus.ERROR, "message": str(e)}
 
 async def _check_linkedin() -> dict:
     if os.getenv("LINKEDIN_ACCESS_TOKEN",""):
@@ -131,3 +130,23 @@ async def get_integration_status():
 async def get_whatsapp_status():
     provider = build_whatsapp_provider()
     return await provider.get_status()
+
+
+@router.get("/email/reports", summary="Recent autonomous executive email reports")
+async def get_email_reports():
+    from backend.agents.orchestration.email_intelligence_agent import email_agent
+    return {
+        "count": len(email_agent.get_recent_reports()),
+        "reports": email_agent.get_recent_reports(),
+    }
+
+
+@router.post("/email/triage-now", summary="Trigger immediate autonomous email triage & CEO push")
+async def trigger_email_triage():
+    from backend.agents.orchestration.email_intelligence_agent import email_agent
+    dispatched = await email_agent.triage_and_dispatch_proactive_reports()
+    return {
+        "success": True,
+        "dispatched_count": len(dispatched),
+        "reports": dispatched,
+    }

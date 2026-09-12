@@ -86,16 +86,20 @@ from backend.workflows.api.router import (
     workflows_router,
 )
 
+from backend.agents.orchestration.email_intelligence_agent import email_agent
+
 config = get_config()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan — initialize kernel and background outbox worker."""
+    """Application lifespan — initialize kernel, background outbox worker, and email intelligence agent."""
     kernel = EnterpriseKernel.get_instance()
     await kernel.start()
     await outbox_worker.start()
+    await email_agent.start()
     yield
+    await email_agent.stop()
     await outbox_worker.stop()
     await kernel.stop()
     EnterpriseKernel.reset()

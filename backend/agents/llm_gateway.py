@@ -129,7 +129,7 @@ class ResilientLLMGateway:
         # Use sync generator in thread pool for async consumption
         def get_stream():
             return client.models.generate_content_stream(
-                model="gemini-3.6-flash",
+                model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
                 contents=full_prompt,
             )
 
@@ -156,7 +156,7 @@ class ResilientLLMGateway:
             groq_msgs.append({"role": m.get("role", "user"), "content": m.get("content", "")})
 
         stream = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
             messages=groq_msgs,
             temperature=self.temperature,
             stream=True,
@@ -165,6 +165,19 @@ class ResilientLLMGateway:
             content = chunk.choices[0].delta.content
             if content:
                 yield content
+
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> str:
+        """Helper to collect tokens into a single text response."""
+        messages = [{"role": "user", "content": prompt}]
+        result = []
+        async for token in self.astream_chat(messages, system_instruction=system_prompt):
+            result.append(token)
+        return "".join(result)
 
 
 # Singleton instance
