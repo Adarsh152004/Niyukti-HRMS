@@ -1,7 +1,8 @@
 import * as React from 'react';
 import { 
   Send, Bot, Loader2, RefreshCw, Trash2, Sparkles, 
-  ArrowUpRight, CheckCircle2, Clock, Compass, ShieldCheck
+  ArrowUpRight, CheckCircle2, Clock, Compass, ShieldCheck,
+  Mail, Smartphone, ExternalLink
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -290,19 +291,37 @@ export function AIAssistantPage() {
 
                   {/* Clean inline HITL Approval bar when action is required */}
                   {!isUser && isPendingApproval && workflowId && (
-                    <div className="mt-3 pt-3 border-t border-border flex flex-col gap-2 bg-surface/60 p-3 rounded-xl">
-                      <div className="flex items-center justify-between text-xs text-amber-600 font-medium">
-                        <span className="flex items-center gap-1.5">
+                    <div className="mt-3 pt-3 border-t border-border flex flex-col gap-3 bg-surface/80 p-3.5 rounded-xl border border-amber-500/20 shadow-xs">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5 font-semibold text-amber-600 dark:text-amber-400">
                           <Clock className="w-3.5 h-3.5 animate-pulse" />
-                          Approval Required: {approvalReq?.action_type || 'Workflow Action'}
+                          Human-in-the-Loop Action Required
                         </span>
+                        {sData?.artifact?.type && (
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">
+                            {sData.artifact.type.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Gmail Dispatch Context Preview */}
+                      <div className="text-2xs bg-surface-secondary/70 p-2.5 rounded-lg border border-border/80 space-y-1 text-text-secondary">
+                        <div className="flex items-center gap-1.5 text-text-primary font-medium">
+                          <Mail className="w-3 h-3 text-emerald-600" />
+                          <span>Google Workspace Authorized Dispatch:</span>
+                          <code className="text-[11px] text-accent">2000nyrasharma@gmail.com</code>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-text-muted">
+                          <Smartphone className="w-3 h-3 text-emerald-600" />
+                          <span>Omnichannel Alerts: WhatsApp to Leadership (+91 8591133817) & Live WebSocket</span>
+                        </div>
                       </div>
                       
                       {revisingId === workflowId ? (
                         <div className="flex flex-col gap-2 bg-surface p-2.5 rounded-lg border border-border">
                           <input
                             type="text"
-                            placeholder="Type revision notes..."
+                            placeholder="Type instructions or revision notes (e.g. increase salary, reschedule time)..."
                             value={feedbackInput[workflowId] || ''}
                             onChange={(e) => setFeedbackInput({ ...feedbackInput, [workflowId]: e.target.value })}
                             className="w-full bg-surface-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
@@ -328,10 +347,10 @@ export function AIAssistantPage() {
                             size="sm"
                             variant="primary"
                             onClick={() => handleApprove(workflowId)}
-                            className="text-xs h-8 gap-1.5"
+                            className="text-xs h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs font-semibold"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Approve Action
+                            Approve & Dispatch via Gmail
                           </Button>
                           <Button
                             size="sm"
@@ -339,7 +358,7 @@ export function AIAssistantPage() {
                             onClick={() => setRevisingId(workflowId)}
                             className="text-xs h-8 gap-1.5"
                           >
-                            Request Revision
+                            Request Changes
                           </Button>
                         </div>
                       )}

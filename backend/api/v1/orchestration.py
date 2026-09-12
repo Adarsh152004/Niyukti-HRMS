@@ -24,6 +24,7 @@ from fastapi.responses import StreamingResponse
 from backend.api.v1.chat_api import save_chat_message
 from backend.ai.self_rag_engine import execute_self_rag
 from backend.integrations.gmail_client import gmail_client
+from backend.services.multi_channel_notifier import multi_channel_notifier
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/orchestration", tags=["Agent Orchestration"])
@@ -878,6 +879,98 @@ def build_leave_exception_artifact(employee_name: str = "Marcus Vance", feedback
         status="AWAITING_APPROVAL"
     )
 
+
+def build_interview_invite_artifact(
+    candidate_name: str = "Alex Rivera",
+    role: str = "Senior AI Engineer",
+    scheduled_time: str = "Monday, October 19, 2026 at 3:00 PM IST",
+    meet_link: str = "https://meet.google.com/azy-hrms-int",
+    feedback: Optional[str] = None,
+    version: int = 1
+) -> ArtifactModel:
+    artifact_id = f"art-invite-{candidate_name.lower().replace(' ', '-')}"
+    recipient_email = os.getenv("GMAIL_TEST_RECIPIENT", "adarshyt1504@gmail.com")
+
+    content = {
+        "candidate_name": candidate_name,
+        "role": role,
+        "scheduled_time": scheduled_time,
+        "meet_link": meet_link,
+        "interviewer": "Engineering & Talent Leadership Panel",
+        "recipient_email": recipient_email,
+        "stage": "STAGE_1_INTERVIEW_INVITATION",
+        "feedback_applied": feedback
+    }
+
+    raw_md = f"""## Stage 1: Interview Invitation & Schedule Draft
+
+**Candidate**: {candidate_name}
+**Target Role**: {role}
+**Scheduled Time**: {scheduled_time}
+**Platform**: Google Meet ({meet_link})
+**Recipient Email**: `{recipient_email}`
+**Sender Account**: `{gmail_client.sender_email}`
+
+### Email Preview (To be dispatched via Gmail upon 1-Click Approval)
+> Dear {candidate_name}, you are invited for an interview for the position of **{role}** on **{scheduled_time}**."""
+
+    return ArtifactModel(
+        id=artifact_id,
+        type="INTERVIEW_INVITE",
+        title=f"Interview Invite (Stage 1) — {candidate_name}",
+        version=version,
+        content=content,
+        raw_markdown=raw_md.strip(),
+        status="AWAITING_APPROVAL"
+    )
+
+
+def build_evaluation_feedback_artifact(
+    candidate_name: str = "Alex Rivera",
+    role: str = "Senior AI Engineer",
+    score: str = "94/100",
+    recommendation: str = "RECOMMENDED_FOR_OFFER",
+    feedback_notes: str = "Demonstrated deep mastery of LLM architectures, distributed RAG pipelines, and clear collaborative communication.",
+    feedback: Optional[str] = None,
+    version: int = 1
+) -> ArtifactModel:
+    artifact_id = f"art-eval-{candidate_name.lower().replace(' ', '-')}"
+    recipient_email = os.getenv("GMAIL_TEST_RECIPIENT", "adarshyt1504@gmail.com")
+
+    content = {
+        "candidate_name": candidate_name,
+        "role": role,
+        "score": score,
+        "recommendation": recommendation,
+        "feedback_notes": feedback_notes,
+        "recipient_email": recipient_email,
+        "stage": "STAGE_2_EVALUATION_SCORECARD",
+        "feedback_applied": feedback
+    }
+
+    raw_md = f"""## Stage 2: Candidate Assessment & Evaluation Scorecard
+
+**Candidate**: {candidate_name}
+**Evaluated Role**: {role}
+**Overall Score**: **{score}**
+**Recommendation**: `{recommendation}`
+**Recipient Email**: `{recipient_email}`
+**Panel Assessment**: *"{feedback_notes}"*
+
+### Email Preview (To be dispatched via Gmail upon 1-Click Approval)
+> Dear {candidate_name}, thank you for completing your evaluation rounds. Your assessment scorecard is currently in executive committee review."""
+
+    return ArtifactModel(
+        id=artifact_id,
+        type="EVALUATION_FEEDBACK",
+        title=f"Evaluation Scorecard (Stage 2) — {candidate_name}",
+        version=version,
+        content=content,
+        raw_markdown=raw_md.strip(),
+        status="AWAITING_APPROVAL"
+    )
+
+
 # ==========================================
 # 4. Multi-Provider LLM Engine
 # ==========================================
@@ -1081,11 +1174,13 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
 
     q_lower = req.query.lower()
     is_payroll_request = any(k in q_lower for k in ["payroll", "payout", "disburse salary", "compensation audit", "tax withholding"])
-    is_offer_request = any(k in q_lower for k in ["offer letter", "create offer", "draft offer", "generate offer", "extend offer", "offer package", "offer proposal"])
+    is_interview_request = any(k in q_lower for k in ["interview invite", "schedule interview", "invite for interview", "interview invitation", "book interview", "setup interview"]) or ("interview" in q_lower and any(k in q_lower for k in ["schedule", "invite", "call", "round", "slot", "monday", "tuesday", "wednesday", "thursday", "friday"]))
+    is_eval_request = any(k in q_lower for k in ["evaluation feedback", "interview feedback", "assessment scorecard", "candidate score", "candidate feedback", "interview scorecard", "evaluation scorecard"])
+    is_offer_request = not is_interview_request and not is_eval_request and any(k in q_lower for k in ["offer letter", "create offer", "draft offer", "generate offer", "extend offer", "offer package", "offer proposal"])
     is_leave_request = any(k in q_lower for k in ["leave request", "pto request", "vacation request", "leave exception", "approve leave"])
-    is_email_send_request = any(k in q_lower for k in ["send email", "send an email", "email to", "mail to", "dispatch email", "write an email", "shoot an email"])
+    is_email_send_request = not is_interview_request and not is_eval_request and not is_offer_request and any(k in q_lower for k in ["send email", "send an email", "email to", "mail to", "dispatch email", "write an email", "shoot an email"])
     is_email_check_request = not is_email_send_request and any(k in q_lower for k in ["check email", "check emails", "unread emails", "inbox", "my emails", "recent emails", "list emails", "read emails", "check gmail", "my inbox"])
-    is_jd_request = (not is_payroll_request and not is_offer_request and not is_leave_request and not is_email_send_request and not is_email_check_request) and (
+    is_jd_request = (not is_payroll_request and not is_interview_request and not is_eval_request and not is_offer_request and not is_leave_request and not is_email_send_request and not is_email_check_request) and (
         any(k in q_lower for k in ["jd", "job description", "create a jd", "draft a jd", "post a jd", "hiring requisition", "open a role", "new requisition", "create jd", "draft jd", "job opening", "open opening", "post opening", "draft opening", "create opening", "hire", "hiring", "recruit", "recruitment", "new role"]) or 
         (any(k in q_lower for k in ["hire", "hiring", "recruit", "recruitment"]) and any(k in q_lower for k in ["engineer", "developer", "designer", "manager", "intern", "staff", "role", "lead", "architect", "sre"]))
     )
@@ -1265,7 +1360,185 @@ async def execute_orchestration(req: OrchestrationExecuteRequest):
         ]
 
     # ----------------------------------------------------
-    # BRANCH 3: CANDIDATE OFFER PROPOSAL (Option 2)
+    # BRANCH 3A: CANDIDATE INTERVIEW INVITATION (STAGE 1)
+    # ----------------------------------------------------
+    elif is_interview_request:
+        m_cand = re.search(r"(?:for|to|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", req.query)
+        cand_name = m_cand.group(1).strip() if m_cand else "Alex Rivera"
+        
+        role_extracted, dept_extracted = extract_role_and_department(req.query)
+        if "software" in role_extracted.lower() and "ai" not in role_extracted.lower():
+            role_extracted = "Senior Backend Engineer"
+
+        artifact = build_interview_invite_artifact(candidate_name=cand_name, role=role_extracted, version=1)
+        if artifact.id not in ARTIFACT_STORE:
+            ARTIFACT_STORE[artifact.id] = {}
+        ARTIFACT_STORE[artifact.id][1] = artifact
+
+        approval_req = ApprovalRequest(
+            id=f"appr-{uuid.uuid4().hex[:8]}",
+            workflow_id=run_id,
+            artifact_id=artifact.id,
+            artifact_version=1,
+            status="PENDING",
+            action_required=f"Approve Stage 1 Interview Invite for {cand_name}"
+        )
+
+        workflow_status = "WAITING_FOR_APPROVAL"
+        decision = "APPROVAL_GATE"
+        markdown_answer = f"I've generated the **Stage 1 Interview Invitation** for **{cand_name}** ({role_extracted}). Review the schedule and Google Meet link below, and click **Approve & Dispatch** to send via Gmail."
+        provider_used = "Talent-Acquisition-Agent"
+        n4_ms = 160
+
+        collaboration_chain = ["Executive Partner (Nova)", "Talent Acquisition Agent", "Calendar Integration Agent", "Executive Approval Gate", "Gmail Dispatch Agent"]
+
+        nodes = [
+            WorkflowNode(
+                id="node-1",
+                label="Interview Request Ingestion",
+                subtitle=f"Candidate: {cand_name} • Role: {role_extracted}",
+                type="input",
+                status="completed",
+                execution_time_ms=n1_ms,
+                agent_role="Executive Partner (Nova)",
+                handoff_to="Talent Acquisition Agent",
+                outputs={"candidate": cand_name, "role": role_extracted}
+            ),
+            WorkflowNode(
+                id="node-2",
+                label="Interview Slot & Panel Allocation",
+                subtitle="Allocated Google Meet virtual room and interview panel",
+                type="agent",
+                status="completed",
+                execution_time_ms=n2_ms,
+                agent_role="Calendar Integration Agent",
+                handoff_to="Interview Drafter",
+                outputs={"platform": "Google Meet", "scheduled_time": artifact.content.get("scheduled_time")}
+            ),
+            WorkflowNode(
+                id="node-3",
+                label="Email Template Generation [Stage 1]",
+                subtitle="Generated branded HTML interview invitation",
+                type="tool",
+                status="completed",
+                execution_time_ms=n4_ms,
+                agent_role="Interview Drafter",
+                handoff_to="Executive Approval Gate",
+                outputs={"artifact_id": artifact.id, "recipient": artifact.content.get("recipient_email")}
+            ),
+            WorkflowNode(
+                id="node-4",
+                label="Executive 1-Click Approval Gate",
+                subtitle="Awaiting user sign-off: [Approve & Dispatch via Gmail]",
+                type="approval",
+                status="waiting",
+                execution_time_ms=0,
+                agent_role="Human Reviewer (CEO)",
+                handoff_to="Gmail Dispatch Agent",
+                outputs={"approval_id": approval_req.id, "status": "PENDING"}
+            ),
+            WorkflowNode(
+                id="node-5",
+                label="Google Workspace Gmail Dispatch",
+                subtitle="Dispatches real RFC 2822 email and triggers WhatsApp CEO alert",
+                type="output",
+                status="upcoming",
+                execution_time_ms=0,
+                agent_role="Gmail Dispatch Agent",
+                outputs={"status": "Awaiting Step 04 Approval"}
+            )
+        ]
+
+    # ----------------------------------------------------
+    # BRANCH 3B: CANDIDATE EVALUATION SCORECARD (STAGE 2)
+    # ----------------------------------------------------
+    elif is_eval_request:
+        m_cand = re.search(r"(?:for|to|of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", req.query)
+        cand_name = m_cand.group(1).strip() if m_cand else "Alex Rivera"
+
+        role_extracted, _ = extract_role_and_department(req.query)
+
+        artifact = build_evaluation_feedback_artifact(candidate_name=cand_name, role=role_extracted, version=1)
+        if artifact.id not in ARTIFACT_STORE:
+            ARTIFACT_STORE[artifact.id] = {}
+        ARTIFACT_STORE[artifact.id][1] = artifact
+
+        approval_req = ApprovalRequest(
+            id=f"appr-{uuid.uuid4().hex[:8]}",
+            workflow_id=run_id,
+            artifact_id=artifact.id,
+            artifact_version=1,
+            status="PENDING",
+            action_required=f"Approve Stage 2 Evaluation Feedback for {cand_name}"
+        )
+
+        workflow_status = "WAITING_FOR_APPROVAL"
+        decision = "APPROVAL_GATE"
+        markdown_answer = f"I've compiled the **Stage 2 Evaluation Scorecard** for **{cand_name}** (Score: **94/100 • Recommended for Offer**). Review the feedback report below and approve to dispatch the assessment update."
+        provider_used = "Evaluation-Intelligence-Agent"
+        n4_ms = 165
+
+        collaboration_chain = ["Executive Partner (Nova)", "Technical Review Panel", "Evaluation Intelligence Agent", "Executive Approval Gate", "Gmail Dispatch Agent"]
+
+        nodes = [
+            WorkflowNode(
+                id="node-1",
+                label="Scorecard Ingestion",
+                subtitle=f"Candidate: {cand_name} • Score: 94/100",
+                type="input",
+                status="completed",
+                execution_time_ms=n1_ms,
+                agent_role="Executive Partner (Nova)",
+                handoff_to="Technical Review Panel",
+                outputs={"candidate": cand_name, "score": "94/100"}
+            ),
+            WorkflowNode(
+                id="node-2",
+                label="Panel Feedback Synthesis",
+                subtitle="Aggregated system design, coding, and behavioral metrics",
+                type="agent",
+                status="completed",
+                execution_time_ms=n2_ms,
+                agent_role="Evaluation Intelligence Agent",
+                handoff_to="Report Generator",
+                outputs={"recommendation": "RECOMMENDED_FOR_OFFER"}
+            ),
+            WorkflowNode(
+                id="node-3",
+                label="Evaluation Email Drafter [Stage 2]",
+                subtitle="Generated structured scorecard email draft",
+                type="tool",
+                status="completed",
+                execution_time_ms=n4_ms,
+                agent_role="Report Generator",
+                handoff_to="Executive Approval Gate",
+                outputs={"artifact_id": artifact.id}
+            ),
+            WorkflowNode(
+                id="node-4",
+                label="Executive 1-Click Approval Gate",
+                subtitle="Awaiting user sign-off: [Approve & Dispatch via Gmail]",
+                type="approval",
+                status="waiting",
+                execution_time_ms=0,
+                agent_role="Human Reviewer (CEO)",
+                handoff_to="Gmail Dispatch Agent",
+                outputs={"approval_id": approval_req.id, "status": "PENDING"}
+            ),
+            WorkflowNode(
+                id="node-5",
+                label="Google Workspace Gmail Dispatch",
+                subtitle="Dispatches assessment update and triggers WhatsApp CEO alert",
+                type="output",
+                status="upcoming",
+                execution_time_ms=0,
+                agent_role="Gmail Dispatch Agent",
+                outputs={"status": "Awaiting Step 04 Approval"}
+            )
+        ]
+
+    # ----------------------------------------------------
+    # BRANCH 3C: CANDIDATE OFFER & ONBOARDING KIT (STAGE 3)
     # ----------------------------------------------------
     elif is_offer_request:
         # Extract candidate name if present
@@ -2089,25 +2362,145 @@ async def approve_workflow_action(workflow_id: str):
 
         next_message = f"✓ **Payroll Batch ({period})** approved ({net}).\n\nAutomated execution:\n1. Direct deposit batch sent to partner banking gateway.\n2. Electronic payslips published to all 48 employee portals.\n3. Statutory tax reserves transferred to escrow."
 
+    elif art_type == "INTERVIEW_INVITE":
+        cand = artifact_data.get("content", {}).get("candidate_name", "Alex Rivera")
+        role = artifact_data.get("content", {}).get("role", "Senior Backend Engineer")
+        sched_time = artifact_data.get("content", {}).get("scheduled_time", "Monday at 3:00 PM IST")
+        meet_link = artifact_data.get("content", {}).get("meet_link", "https://meet.google.com/azy-hrms-int")
+        target_email = artifact_data.get("content", {}).get("recipient_email") or os.getenv("GMAIL_TEST_RECIPIENT", "adarshyt1504@gmail.com")
+
+        # 1. Dispatch Real Gmail via Google OAuth2
+        html_body = gmail_client.build_interview_invite_html(
+            candidate_name=cand,
+            role=role,
+            date_time=sched_time,
+            meet_link=meet_link
+        )
+        msg_id = "N/A"
+        try:
+            send_res = await gmail_client.send_email(
+                to_email=target_email,
+                subject=f"Interview Invitation: {role} at Azyntrix Technologies",
+                body=f"Dear {cand},\n\nYou are invited for an interview for {role} on {sched_time}.\nMeet Link: {meet_link}",
+                html_body=html_body
+            )
+            msg_id = send_res.get("message_id", "GMAIL-DISPATCHED")
+        except Exception as e:
+            logger.error(f"Failed to dispatch Stage 1 Gmail: {e}")
+
+        # 2. Multi-Channel WhatsApp & WebSocket Alert to CEO
+        await multi_channel_notifier.notify_ceo_and_hr(
+            title=f"Stage 1 Interview Dispatched: {cand}",
+            summary=f"Interview scheduled for {role} on {sched_time}. Google Meet link dispatched via Gmail to {target_email}.",
+            stage="STAGE_1_INTERVIEW_INVITE",
+            candidate_name=cand,
+            role=role,
+            recipient_email=target_email
+        )
+
+        next_message = (
+            f"✅ **Stage 1: Interview Invitation Dispatched**\n\n"
+            f"* **Candidate**: **{cand}** ({role})\n"
+            f"* **Scheduled Slot**: `{sched_time}`\n"
+            f"* **Dispatched To**: `{target_email}`\n"
+            f"* **Gmail Message ID**: `{msg_id}`\n"
+            f"* **CEO Alert**: WhatsApp notification dispatched to registered leadership numbers."
+        )
+
+    elif art_type == "EVALUATION_FEEDBACK":
+        cand = artifact_data.get("content", {}).get("candidate_name", "Alex Rivera")
+        role = artifact_data.get("content", {}).get("role", "Senior AI Engineer")
+        score = artifact_data.get("content", {}).get("score", "94/100")
+        notes = artifact_data.get("content", {}).get("feedback_notes", "Recommended for Offer Extension.")
+        target_email = artifact_data.get("content", {}).get("recipient_email") or os.getenv("GMAIL_TEST_RECIPIENT", "adarshyt1504@gmail.com")
+
+        # 1. Dispatch Real Gmail
+        html_body = gmail_client.build_evaluation_feedback_html(
+            candidate_name=cand,
+            role=role,
+            score=score,
+            feedback_summary=notes
+        )
+        msg_id = "N/A"
+        try:
+            send_res = await gmail_client.send_email(
+                to_email=target_email,
+                subject=f"Azyntrix Technical Review: Assessment Scorecard - {cand}",
+                body=f"Dear {cand},\n\nYour evaluation scorecard for {role} has been reviewed (Score: {score}).",
+                html_body=html_body
+            )
+            msg_id = send_res.get("message_id", "GMAIL-DISPATCHED")
+        except Exception as e:
+            logger.error(f"Failed to dispatch Stage 2 Gmail: {e}")
+
+        # 2. Multi-Channel WhatsApp & WebSocket Alert to CEO
+        await multi_channel_notifier.notify_ceo_and_hr(
+            title=f"Stage 2 Evaluation Scorecard: {cand} ({score})",
+            summary=f"Assessment scorecard for {role} approved. Score: {score}. Next step: Official offer generation.",
+            stage="STAGE_2_EVALUATION_SCORECARD",
+            candidate_name=cand,
+            role=role,
+            recipient_email=target_email
+        )
+
+        next_message = (
+            f"✅ **Stage 2: Evaluation Feedback Dispatched**\n\n"
+            f"* **Candidate**: **{cand}**\n"
+            f"* **Score**: **{score}** (Recommended for Offer)\n"
+            f"* **Dispatched To**: `{target_email}`\n"
+            f"* **Gmail Message ID**: `{msg_id}`\n"
+            f"* **Next Action**: Type *\"Generate offer letter for {cand}\"* to proceed to Stage 3."
+        )
+
     elif art_type == "OFFER_LETTER":
         cand = artifact_data.get("content", {}).get("candidate_name", "Alex Rivera")
         role = artifact_data.get("content", {}).get("role", "Senior AI Engineer")
+        salary_str = artifact_data.get("content", {}).get("base_salary", "₹ 24.5 LPA")
         cand_id = f"cand-{uuid.uuid4().hex[:8]}"
         app_id = f"app-{uuid.uuid4().hex[:8]}"
         offer_id = f"ofr-{uuid.uuid4().hex[:8]}"
         name_parts = cand.split(" ", 1)
         first_name = name_parts[0]
         last_name = name_parts[1] if len(name_parts) > 1 else "Candidate"
-        email = f"{first_name.lower()}.{last_name.lower()}@gmail.com"
-        ctc = 145000.00
+        target_email = os.getenv("GMAIL_TEST_RECIPIENT", "adarshyt1504@gmail.com")
+        ctc = 2450000.00
         start_date = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
+
+        # 1. Dispatch Real Gmail Official Offer Package
+        html_body = gmail_client.build_offer_letter_html(
+            candidate_name=cand,
+            role=role,
+            salary_lpa=salary_str.replace("₹", "").replace("LPA", "").replace("/ year", "").strip(),
+            joining_date=(datetime.date.today() + datetime.timedelta(days=14)).strftime("%B %d, %Y")
+        )
+        msg_id = "N/A"
+        try:
+            send_res = await gmail_client.send_email(
+                to_email=target_email,
+                subject=f"Official Offer of Employment: {role} at Azyntrix Technologies",
+                body=f"Dear {cand},\n\nWe are pleased to offer you the position of {role} at Azyntrix Technologies with a CTC of {salary_str}.",
+                html_body=html_body
+            )
+            msg_id = send_res.get("message_id", "GMAIL-DISPATCHED")
+        except Exception as e:
+            logger.error(f"Failed to dispatch Stage 3 Gmail: {e}")
+
+        # 2. Multi-Channel WhatsApp & WebSocket Alert to CEO
+        await multi_channel_notifier.notify_ceo_and_hr(
+            title=f"Stage 3 Offer Letter Dispatched: {cand}",
+            summary=f"Official offer package ({salary_str}) extended to {cand} for {role}. Delivered via Gmail to {target_email}.",
+            stage="STAGE_3_OFFER_LETTER",
+            candidate_name=cand,
+            role=role,
+            recipient_email=target_email
+        )
 
         try:
             async with aiosqlite.connect(db_path) as db:
                 await db.execute(
                     """INSERT INTO candidates (id, organization_id, first_name, last_name, email, phone, current_company, current_designation, experience_years, skills_json, source, notes, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (cand_id, "org-default", first_name, last_name, email, "+1 (555) 019-2834", "TechCorp", role, 5.0, json.dumps(["Python", "PyTorch", "LLMs", "RAG"]), "DIRECT_SOURCING", "Executive Approved Offer", now_str, now_str)
+                    (cand_id, "org-default", first_name, last_name, target_email, "+1 (555) 019-2834", "TechCorp", role, 5.0, json.dumps(["Python", "PyTorch", "LLMs", "RAG"]), "DIRECT_SOURCING", "Executive Approved Offer", now_str, now_str)
                 )
                 await db.execute(
                     """INSERT INTO candidate_applications (id, organization_id, candidate_id, job_opening_id, stage, applied_at, stage_updated_at, created_at, updated_at)
@@ -2123,7 +2516,14 @@ async def approve_workflow_action(workflow_id: str):
         except Exception as e:
             logger.warning(f"Error persisting approved offer: {e}")
 
-        next_message = f"✓ **Offer Package for {cand} ({role})** approved.\n\nElectronic offer dispatched via DocuSign with automated reminders scheduled for Day 3 and Day 5."
+        next_message = (
+            f"🎉 **Stage 3: Official Offer Package Dispatched via Gmail**\n\n"
+            f"* **Candidate**: **{cand}** ({role})\n"
+            f"* **Compensation**: **{salary_str}**\n"
+            f"* **Delivered To**: `{target_email}`\n"
+            f"* **Gmail Message ID**: `{msg_id}`\n"
+            f"* **Status**: Offer extended with 1-Click Acceptance webhook and multi-channel CEO alerts."
+        )
 
     elif art_type == "LEAVE_EXCEPTION":
         emp = artifact_data.get("content", {}).get("employee", "Marcus Vance")

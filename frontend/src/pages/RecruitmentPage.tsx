@@ -1,9 +1,10 @@
 import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { 
   Search, Filter, Plus, Briefcase, UserCheck, Sparkles, 
   ChevronRight, Building, DollarSign, Calendar, X, CheckCircle2,
-  Users, Layers, ArrowUpRight
+  Users, Layers, ArrowUpRight, Mail, FileText, Send
 } from 'lucide-react';
 import { PageHeader, Card, CardHeader, CardTitle, MetricCard } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,7 @@ const stageColor: Record<string, string> = {
 };
 
 export function RecruitmentPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = React.useState<'candidates' | 'jobs'>('candidates');
   const [search, setSearch] = React.useState('');
@@ -302,6 +304,7 @@ export function RecruitmentPage() {
                     <TableHead className="text-right">Match Score</TableHead>
                     <TableHead>Applied Date</TableHead>
                     <TableHead>AI Screening Summary</TableHead>
+                    <TableHead className="text-right">Stage Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -328,6 +331,34 @@ export function RecruitmentPage() {
                         <p className="text-xs text-text-secondary truncate" title={c.aiScreening.summary}>
                           {c.aiScreening.summary}
                         </p>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => navigate(`/ai?prompt=${encodeURIComponent(`Schedule interview with ${c.name} for ${c.role} on Monday at 3 PM IST`)}`)}
+                            title="Trigger Stage 1: Interview Invite via Gmail"
+                            className="px-2 py-1 rounded bg-accent-soft hover:bg-accent text-accent hover:text-white text-2xs font-semibold transition flex items-center gap-1"
+                          >
+                            <Calendar className="w-3 h-3" />
+                            <span>1. Invite</span>
+                          </button>
+                          <button
+                            onClick={() => navigate(`/ai?prompt=${encodeURIComponent(`Submit evaluation feedback for ${c.name} for ${c.role}`)}`)}
+                            title="Trigger Stage 2: Evaluation Feedback Scorecard"
+                            className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white dark:bg-indigo-950/40 dark:text-indigo-400 text-2xs font-semibold transition flex items-center gap-1"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>2. Score</span>
+                          </button>
+                          <button
+                            onClick={() => navigate(`/ai?prompt=${encodeURIComponent(`Generate offer letter for ${c.name} for ${c.role} with 24.5 LPA`)}`)}
+                            title="Trigger Stage 3: Official Offer Letter & Onboarding Kit"
+                            className="px-2 py-1 rounded bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white dark:bg-emerald-950/40 dark:text-emerald-400 text-2xs font-semibold transition flex items-center gap-1"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>3. Offer</span>
+                          </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
