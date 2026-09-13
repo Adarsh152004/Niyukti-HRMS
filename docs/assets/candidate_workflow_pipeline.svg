@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 320" width="100%" height="100%">
+  <defs>
+    <linearGradient id="pipeBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#030712"/>
+    </linearGradient>
+    <linearGradient id="stage1Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E3A8A"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="stage2Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#581C87"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="stage3Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064E3B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <filter id="pShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <rect width="1100" height="320" fill="url(#pipeBg)" rx="14" stroke="#1E293B" stroke-width="1.5"/>
+
+  <!-- Title -->
+  <g transform="translate(40, 36)">
+    <text x="0" y="0" fill="#38BDF8" font-family="sans-serif" font-size="11" font-weight="700" letter-spacing="1.5">END-TO-END RECRUITMENT INTELLIGENCE</text>
+    <text x="0" y="24" fill="#F8FAFC" font-family="sans-serif" font-size="20" font-weight="800">3-Stage Candidate Workflow &amp; HITL Dispatch Engine</text>
+  </g>
+
+  <!-- Stage 1 -->
+  <g transform="translate(40, 90)">
+    <rect width="310" height="190" rx="12" fill="url(#stage1Grad)" stroke="#3B82F6" stroke-width="1.5" filter="url(#pShadow)"/>
+    <rect x="16" y="16" width="90" height="22" rx="11" fill="#1D4ED8"/>
+    <text x="61" y="31" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="10" font-weight="700">STAGE 1</text>
+    
+    <text x="16" y="64" fill="#F8FAFC" font-family="sans-serif" font-size="16" font-weight="700">📅 Interview Invitation</text>
+    <text x="16" y="86" fill="#93C5FD" font-family="sans-serif" font-size="12">• Google Meet Link Synthesis</text>
+    <text x="16" y="106" fill="#93C5FD" font-family="sans-serif" font-size="12">• Round Agenda &amp; Preparation Kit</text>
+    <text x="16" y="126" fill="#93C5FD" font-family="sans-serif" font-size="12">• Calendar RFC 2822 Invitation</text>
+    
+    <rect x="16" y="146" width="278" height="28" rx="6" fill="#1E293B" stroke="#60A5FA" stroke-width="0.8"/>
+    <text x="155" y="164" text-anchor="middle" fill="#93C5FD" font-family="sans-serif" font-size="10" font-weight="600">📧 Gmail MCP + WhatsApp Alert</text>
+  </g>
+
+  <!-- Arrow 1 -> 2 -->
+  <g transform="translate(365, 175)">
+    <line x1="0" y1="0" x2="25" y2="0" stroke="#38BDF8" stroke-width="2.5" stroke-dasharray="4 3"/>
+    <polygon points="25,-5 35,0 25,5" fill="#38BDF8"/>
+  </g>
+
+  <!-- Stage 2 -->
+  <g transform="translate(410, 90)">
+    <rect width="310" height="190" rx="12" fill="url(#stage2Grad)" stroke="#A855F7" stroke-width="1.5" filter="url(#pShadow)"/>
+    <rect x="16" y="16" width="90" height="22" rx="11" fill="#7E22CE"/>
+    <text x="61" y="31" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="10" font-weight="700">STAGE 2</text>
+    
+    <text x="16" y="64" fill="#F8FAFC" font-family="sans-serif" font-size="16" font-weight="700">📊 Candidate Scorecard</text>
+    <text x="16" y="86" fill="#E9D5FF" font-family="sans-serif" font-size="12">• AI Competency Rubric Scoring</text>
+    <text x="16" y="106" fill="#E9D5FF" font-family="sans-serif" font-size="12">• Technical &amp; System Design Marks</text>
+    <text x="16" y="126" fill="#E9D5FF" font-family="sans-serif" font-size="12">• Structured Hiring Recommendation</text>
+    
+    <rect x="16" y="146" width="278" height="28" rx="6" fill="#1E293B" stroke="#C084FC" stroke-width="0.8"/>
+    <text x="155" y="164" text-anchor="middle" fill="#E9D5FF" font-family="sans-serif" font-size="10" font-weight="600">📝 Evaluation Artifact Generated</text>
+  </g>
+
+  <!-- Arrow 2 -> 3 -->
+  <g transform="translate(735, 175)">
+    <line x1="0" y1="0" x2="25" y2="0" stroke="#A855F7" stroke-width="2.5" stroke-dasharray="4 3"/>
+    <polygon points="25,-5 35,0 25,5" fill="#A855F7"/>
+  </g>
+
+  <!-- Stage 3 -->
+  <g transform="translate(780, 90)">
+    <rect width="280" height="190" rx="12" fill="url(#stage3Grad)" stroke="#10B981" stroke-width="1.5" filter="url(#pShadow)"/>
+    <rect x="16" y="16" width="90" height="22" rx="11" fill="#047857"/>
+    <text x="61" y="31" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="10" font-weight="700">STAGE 3</text>
+    
+    <text x="16" y="64" fill="#F8FAFC" font-family="sans-serif" font-size="16" font-weight="700">💼 Official Offer &amp; Kit</text>
+    <text x="16" y="86" fill="#A7F3D0" font-family="sans-serif" font-size="12">• Full CTC &amp; Stock Breakdown</text>
+    <text x="16" y="106" fill="#A7F3D0" font-family="sans-serif" font-size="12">• Joining Date &amp; Document Checklist</text>
+    <text x="16" y="126" fill="#A7F3D0" font-family="sans-serif" font-size="12">• 1-Click Human-in-the-Loop Gate</text>
+    
+    <rect x="16" y="146" width="248" height="28" rx="6" fill="#064E3B" stroke="#34D399" stroke-width="0.8"/>
+    <text x="140" y="164" text-anchor="middle" fill="#6EE7B7" font-family="sans-serif" font-size="10" font-weight="700">⚡ 1-Click Approval &amp; Real Dispatch</text>
+  </g>
+</svg>
