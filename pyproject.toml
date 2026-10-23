@@ -1,0 +1,157 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hrms"
+version = "1.0.0"
+description = "AI-Powered Intelligent Human Resource Management System"
+authors = [{ name = "HRMS Team" }]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "httpx>=0.27.0",
+    "python-multipart>=0.0.9",
+    "anyio>=4.4.0",
+    "sqlalchemy>=2.0.30",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "greenlet>=3.0.0",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langgraph>=0.2.0",
+    "faiss-cpu>=1.9.0",
+    "langchain-text-splitters>=0.3.0",
+    "langchain-google-genai>=2.0.0",
+    "aiosqlite>=0.20.0",
+    "passlib>=1.7.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.7",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.9",
+    "black>=24.4.2",
+    "mypy>=1.10.0",
+    "types-passlib>=1.7.7",
+    "httpx>=0.27.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*", "tests*"]
+
+# ─── Ruff ────────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 130
+src = ["backend", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "TC",  # flake8-type-checking
+    "ANN", # flake8-annotations (selected rules only)
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "ANN401", # dynamically typed expressions (Any) allowed for interface flexibility
+    "ANN201", # return type annotations on public functions — too verbose for domain layer
+    "ANN202", # return type annotations on private functions
+    "ANN001", # missing type annotations on function args — relaxed for domain models
+    "ANN002", # missing type annotation for *args
+    "ANN003", # missing type annotation for **kwargs
+    "B008",   # do not perform function call in defaults (FastAPI Depends pattern)
+    "SIM108", # ternary vs if/else — readability preference
+    "E501",   # line too long — enforced by black at 130 chars
+    "RUF002", # ambiguous en-dash in docstrings — acceptable in documentation
+    "RUF012", # mutable class var — Pydantic handles this correctly via Field()
+    "TC001",  # application imports into TYPE_CHECKING block — not enforced here
+    "TC002",  # 3rd party imports into TYPE_CHECKING block — not enforced here
+    "TC003",  # stdlib imports into TYPE_CHECKING block — not enforced here
+    "ANN204", # missing return type annotation for __init__
+    "N818",   # exception name suffix
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN", "S101"]
+
+# ─── Black ───────────────────────────────────────────────────────────────────
+[tool.black]
+target-version = ["py311"]
+line-length = 130
+include = '\.pyi?$'
+
+# ─── MyPy ────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+exclude = [
+    "^tests/",
+]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+ignore_errors = false
+
+# ─── Pytest ──────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--color=yes",
+]
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+    "slow: slow running tests",
+]
+
+# ─── Coverage ────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["backend"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

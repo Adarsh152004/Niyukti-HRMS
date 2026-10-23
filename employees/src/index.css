@@ -1,0 +1,147 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design tokens: Light mode ───────────────────────────────────────── */
+:root {
+  /* Surfaces */
+  --background: 220 14% 97%;        /* #F8F9FB */
+  --surface: 0 0% 100%;             /* #FFFFFF */
+  --surface-secondary: 220 13% 95%; /* #F3F4F6 */
+  --surface-tertiary: 220 14% 93%;  /* #EEF0F3 */
+
+  /* Text */
+  --foreground: 220 26% 10%;        /* #111827 */
+  --text-primary: 220 26% 10%;      /* #111827 */
+  --text-secondary: 220 9% 35%;     /* #4B5563 */
+  --text-muted: 220 9% 46%;         /* #6B7280 */
+
+  /* Borders */
+  --border: 220 13% 90%;            /* #E5E7EB */
+  --border-strong: 220 13% 83%;     /* #D1D5DB */
+
+  /* Blue accent */
+  --accent: 217 91% 52%;            /* #2563EB */
+  --accent-hover: 221 83% 48%;      /* #1D4ED8 */
+  --accent-soft: 214 100% 97%;      /* #EFF6FF */
+  --accent-foreground: 0 0% 100%;
+
+  /* Semantic: Success */
+  --success: 142 72% 36%;           /* #16A34A */
+  --success-soft: 138 76% 97%;      /* #F0FDF4 */
+  --success-foreground: 0 0% 100%;
+
+  /* Semantic: Warning */
+  --warning: 32 95% 44%;            /* #D97706 */
+  --warning-soft: 48 100% 97%;      /* #FFFBEB */
+  --warning-foreground: 0 0% 100%;
+
+  /* Semantic: Danger */
+  --danger: 0 84% 60%;              /* #DC2626 */
+  --danger-soft: 0 86% 97%;         /* #FEF2F2 */
+  --danger-foreground: 0 0% 100%;
+
+  /* Semantic: Info */
+  --info: 191 91% 37%;              /* #0891B2 */
+  --info-soft: 186 100% 97%;        /* #ECFEFF */
+  --info-foreground: 0 0% 100%;
+
+  /* AI violet (used sparingly) */
+  --ai: 263 70% 50%;                /* #7C3AED */
+  --ai-soft: 270 100% 98%;          /* #F5F3FF */
+  --ai-foreground: 0 0% 100%;
+}
+
+/* ─── Design tokens: Dark mode ────────────────────────────────────────── */
+.dark {
+  --background: 228 14% 7%;         /* #0F1115 */
+  --surface: 228 14% 11%;           /* #171A21 */
+  --surface-secondary: 228 14% 14%; /* #1E222B */
+  --surface-tertiary: 228 14% 17%;  /* #222732 */
+
+  --foreground: 210 20% 98%;        /* #F9FAFB */
+  --text-primary: 210 20% 98%;      /* #F9FAFB */
+  --text-secondary: 240 5% 64%;     /* #A1A1AA */
+  --text-muted: 240 4% 46%;         /* #71717A */
+
+  --border: 228 14% 20%;            /* #272B35 */
+  --border-strong: 228 14% 26%;     /* #333842 */
+
+  --accent: 213 94% 68%;            /* #60A5FA */
+  --accent-hover: 213 94% 72%;
+  --accent-soft: 217 91% 14%;
+  --accent-foreground: 228 14% 7%;
+
+  --success: 142 72% 42%;
+  --success-soft: 142 76% 8%;
+  --success-foreground: 0 0% 100%;
+
+  --warning: 32 95% 50%;
+  --warning-soft: 32 100% 8%;
+  --warning-foreground: 0 0% 100%;
+
+  --danger: 0 84% 65%;
+  --danger-soft: 0 86% 8%;
+  --danger-foreground: 0 0% 100%;
+
+  --info: 191 91% 42%;
+  --info-soft: 186 100% 8%;
+  --info-foreground: 0 0% 100%;
+
+  --ai: 263 70% 65%;
+  --ai-soft: 263 70% 10%;
+  --ai-foreground: 0 0% 100%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans text-base;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-background;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-strong rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-muted;
+  }
+}
+
+@layer utilities {
+  .text-page-title {
+    @apply text-3xl font-bold tracking-tight text-text-primary;
+  }
+  .text-section-title {
+    @apply text-xl font-semibold text-text-primary;
+  }
+  .text-card-title {
+    @apply text-base font-semibold text-text-primary;
+  }
+  .text-label {
+    @apply text-xs font-medium text-text-secondary uppercase tracking-wide;
+  }
+  .text-meta {
+    @apply text-xs text-text-muted;
+  }
+}

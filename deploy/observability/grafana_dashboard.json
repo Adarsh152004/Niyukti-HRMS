@@ -1,0 +1,88 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "API Gateway Request Latency (p50, p95, p99)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 Latency (s)"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99 Latency (s)"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "title": "AI Agent Fleet Task Throughput (ops/sec)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(ai_agent_tasks_total[1m])) by (agent_role)",
+          "legendFormat": "{{agent_role}}"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "title": "Human-in-the-Loop Approval Queue Pending Lag",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(hitl_approval_pending_count)",
+          "legendFormat": "Pending Approvals"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "title": "ML Model Calibration Error (ECE)",
+      "type": "gauge",
+      "fieldConfig": {
+        "defaults": {
+          "max": 0.15,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "ml_model_expected_calibration_error",
+          "legendFormat": "{{model_id}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["ai-hrms", "production", "slo"],
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "AI-Powered HRMS Production Observability Dashboard",
+  "version": 1
+}
